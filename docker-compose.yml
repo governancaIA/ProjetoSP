@@ -1,0 +1,192 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: fiscalai-postgres
+    environment:
+      POSTGRES_USER: fiscalai_user
+      POSTGRES_PASSWORD: fiscalai_password_dev
+      POSTGRES_DB: fiscalai_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fiscalai_user -d fiscalai_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fiscalai-network
+
+  # Redis Cache & Task Broker
+  redis:
+    image: redis:7-alpine
+    container_name: fiscalai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fiscalai-network
+
+  # MinIO S3-Compatible Storage
+  minio:
+    image: minio/minio:latest
+    container_name: fiscalai-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin_password_dev
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: minio server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fiscalai-network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fiscalai-backend
+    environment:
+      DATABASE_URL: postgresql://fiscalai_user:fiscalai_password_dev@postgres:5432/fiscalai_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin_password_dev
+      MINIO_USE_SSL: "false"
+      DEBUG: "true"
+      SECRET_KEY: fiscal-ai-development-key-change-in-production
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - fiscalai-network
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fiscalai-celery-worker
+    environment:
+      DATABASE_URL: postgresql://fiscalai_user:fiscalai_password_dev@postgres:5432/fiscalai_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin_password_dev
+      MINIO_USE_SSL: "false"
+      DEBUG: "true"
+      SECRET_KEY: fiscal-ai-development-key-change-in-production
+    depends_on:
+      - postgres
+      - redis
+      - minio
+      - backend
+    volumes:
+      - ./backend:/app
+    command: celery -A app.core.celery_app worker --loglevel=info
+    networks:
+      - fiscalai-network
+
+  # Celery Beat (Scheduled Tasks)
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fiscalai-celery-beat
+    environment:
+      DATABASE_URL: postgresql://fiscalai_user:fiscalai_password_dev@postgres:5432/fiscalai_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin_password_dev
+      MINIO_USE_SSL: "false"
+      DEBUG: "true"
+      SECRET_KEY: fiscal-ai-development-key-change-in-production
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    volumes:
+      - ./backend:/app
+    command: celery -A app.core.celery_app beat --loglevel=info
+    networks:
+      - fiscalai-network
+
+  # Flower (Celery Monitoring)
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fiscalai-flower
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery-worker
+    command: celery -A app.core.celery_app flower --port=5555
+    networks:
+      - fiscalai-network
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fiscalai-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    command: npm run dev
+    depends_on:
+      - backend
+    networks:
+      - fiscalai-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  fiscalai-network:
+    driver: bridge
