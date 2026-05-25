@@ -6,7 +6,7 @@ python-multipart==0.0.6
 # Database
 sqlalchemy==2.0.23
 alembic==1.13.0
-psycopg==3.1.14
+psycopg2-binary==2.9.9
 alembic-utils==0.3.6
 
 # Async & Task Queue
@@ -26,7 +26,8 @@ pydantic-extra-types==2.3.0
 # XML/Data Parsing
 lxml==4.9.3
 xmltodict==0.13.0
-pandas>=2.2.0
+numpy==1.24.3
+pandas==2.0.3
 python-dateutil==2.8.2
 
 # Authentication & Security

@@ -2,11 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies (including build-essential for C++ compilation)
-RUN apt-get update && apt-get install -y \
-    build-essential \
+# Install system dependencies (minimal set)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip to latest
+RUN pip install --upgrade pip setuptools wheel
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
