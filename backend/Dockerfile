@@ -2,9 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (including build-essential for C++ compilation)
 RUN apt-get update && apt-get install -y \
-    gcc \
+    build-essential \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
