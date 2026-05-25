@@ -1,0 +1,111 @@
+import axios from 'axios'
+import type {
+  AlertQueueResponse,
+  PeriodScoreResponse,
+  DocumentScoreResponse,
+  ValidationResultsResponse,
+  DocumentsResponse,
+} from '@/types/api'
+import type { TokenResponse } from '@/types/auth'
+
+const TOKEN_KEY = 'fiscalai_token'
+const REFRESH_TOKEN_KEY = 'fiscalai_refresh'
+
+const client = axios.create({
+  baseURL: '/api/v1',
+  timeout: 15_000,
+  headers: { 'Content-Type': 'application/json' },
+})
+
+// Request interceptor: adiciona Bearer token
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// Response interceptor: trata 401 com refresh token
+client.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true
+
+      try {
+        const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
+        if (!refreshToken) {
+          // Sem refresh token, redirecionar para login
+          localStorage.removeItem(TOKEN_KEY)
+          localStorage.removeItem(REFRESH_TOKEN_KEY)
+          window.location.href = '/login'
+          return Promise.reject(error)
+        }
+
+        // Tentar refresh
+        const refreshResponse = await axios.post<TokenResponse>(
+          '/api/v1/auth/refresh',
+          { refresh_token: refreshToken },
+          { baseURL: '/' }
+        )
+
+        const { access_token, refresh_token } = refreshResponse.data
+        localStorage.setItem(TOKEN_KEY, access_token)
+        localStorage.setItem(REFRESH_TOKEN_KEY, refresh_token)
+
+        // Retry original request com novo token
+        originalRequest.headers.Authorization = `Bearer ${access_token}`
+        return client(originalRequest)
+      } catch (refreshError) {
+        // Refresh falhou, limpar e redirecionar
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem(REFRESH_TOKEN_KEY)
+        window.location.href = '/login'
+        return Promise.reject(refreshError)
+      }
+    }
+
+    return Promise.reject(error)
+  }
+)
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+
+export const fetchAlertQueue = (limit = 10): Promise<AlertQueueResponse> =>
+  client
+    .get<AlertQueueResponse>('/alerts/priority-queue', {
+      params: { limit },
+    })
+    .then((r) => r.data)
+
+// ── Period Score ──────────────────────────────────────────────────────────────
+
+export const fetchPeriodScore = (
+  year: number,
+  month: number
+): Promise<PeriodScoreResponse> =>
+  client
+    .get<PeriodScoreResponse>(`/periods/${year}/${month}/score`)
+    .then((r) => r.data)
+
+// ── Document Score ────────────────────────────────────────────────────────────
+
+export const fetchDocumentScore = (id: number): Promise<DocumentScoreResponse> =>
+  client.get<DocumentScoreResponse>(`/documents/${id}/score`).then((r) => r.data)
+
+// ── Validation Results ────────────────────────────────────────────────────────
+
+export const fetchValidationResults = (
+  id: number
+): Promise<ValidationResultsResponse> =>
+  client
+    .get<ValidationResultsResponse>(`/documents/${id}/validation-results`)
+    .then((r) => r.data)
+
+// ── Documents List (stub) ─────────────────────────────────────────────────────
+
+export const fetchDocuments = (): Promise<DocumentsResponse> =>
+  client.get<DocumentsResponse>('/documents').then((r) => r.data)

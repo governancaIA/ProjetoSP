@@ -1,0 +1,51 @@
+# Core Framework
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.13.0
+psycopg==3.1.14
+alembic-utils==0.3.6
+
+# Async & Task Queue
+celery==5.3.4
+redis==5.0.1
+flower==2.0.1
+
+# Cloud Storage (S3/MinIO)
+boto3==1.29.7
+minio==7.2.2
+
+# Data Validation & Serialization
+pydantic==2.5.0
+pydantic-settings==2.1.0
+pydantic-extra-types==2.3.0
+
+# XML/Data Parsing
+lxml==4.9.3
+xmltodict==0.13.0
+pandas==2.1.0
+python-dateutil==2.8.2
+
+# Authentication & Security
+python-jose==3.3.0
+passlib==1.7.4
+python-dotenv==1.0.0
+cryptography==41.0.7
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+factory-boy==3.3.0
+faker==21.0.0
+httpx==0.25.2
+
+# Logging & Monitoring
+python-json-logger==2.0.7
+
+# Utilities
+python-slugify==8.0.1
+pytz==2023.3
