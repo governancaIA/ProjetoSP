@@ -10,7 +10,7 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - VITE_API_URL=https://adriner.fr/sed/api/v1
+      - VITE_API_URL=https://adriner.fr/fiscalia/api/v1
       - NODE_ENV=production
     restart: always
     networks:
@@ -43,9 +43,9 @@ services:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=FiscalAI#MinIO2026!@Secure
       - MINIO_BUCKET=fiscalai-documents
-      - CORS_ORIGINS=https://adriner.fr,https://www.adriner.fr,http://localhost:5173
+      - CORS_ORIGINS=https://adriner.fr,http://localhost:5173
       - SECRET_KEY=k8x!@mP9$vQ2rL5&nJ4wH7cF3bG6yT1Z
-      - ALLOWED_HOSTS=adriner.fr,www.adriner.fr,backend,localhost
+      - ALLOWED_HOSTS=adriner.fr,backend,localhost
       - LOG_LEVEL=INFO
     depends_on:
       postgres:
@@ -164,7 +164,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin_password
-      MINIO_BROWSER_REDIRECT_URL: https://adriner.fr/sed/minio
+      MINIO_BROWSER_REDIRECT_URL: https://adriner.fr/fiscalia/minio
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
