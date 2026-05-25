@@ -26,7 +26,7 @@ pydantic-extra-types==2.3.0
 # XML/Data Parsing
 lxml==4.9.3
 xmltodict==0.13.0
-pandas==2.1.0
+pandas>=2.2.0
 python-dateutil==2.8.2
 
 # Authentication & Security
