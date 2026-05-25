@@ -58,14 +58,26 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## EasyPanel Deployment
 
-Para deploy automático no EasyPanel:
+FiscalAI está pronto para rodar no EasyPanel com toda a stack (PostgreSQL, Redis, MinIO).
 
-```powershell
-cd infra/scripts
-.\setup-easypanel.ps1 -APIKey "sua_chave" -GitRepo "seu_repo_url"
-```
+**Guias de Deploy:**
 
-Veja [setup-easypanel.ps1](scripts/setup-easypanel.ps1) para detalhes.
+1. **🚀 Quick Start** — [QUICKSTART_EASYPANEL.md](QUICKSTART_EASYPANEL.md)  
+   Resumo de 5 passos para colocar no ar rapidamente.
+
+2. **📖 Guia Completo** — [EASYPANEL_SETUP_GUIA.md](EASYPANEL_SETUP_GUIA.md)  
+   Passo-a-passo detalhado com troubleshooting.
+
+3. **🏗️ Arquitetura** — [EASYPANEL_ARQUITETURA.md](EASYPANEL_ARQUITETURA.md)  
+   Entenda como os componentes se conectam.
+
+**Resumo:**
+- 2 Apps: Backend (FastAPI) + Frontend (React)
+- 3 Serviços: PostgreSQL, Redis, MinIO
+- SSL automático via Let's Encrypt
+- Deploy contínuo do GitHub
+
+Veja [setup-easypanel.ps1](scripts/setup-easypanel.ps1) para detalhes técnicos.
 
 ## Health Checks
 
