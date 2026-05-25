@@ -100,39 +100,200 @@ Empresas brasileiras sofrem com:
 
 ```
 fiscalai/
+├── README.md
 ├── CLAUDE.md                  ← este arquivo
-├── docs/
+├── .gitignore                 ← commit obrigatório
+│
+├── docs/                      ← Documentação do projeto
 │   ├── epics.md               ← épicos e user stories
-│   ├── arquitetura.md         ← decisões de arquitetura (ADRs)
-│   ├── regras-fiscais.md      ← knowledge base de regras tributárias BR
-│   └── glossario.md           ← termos fiscais e siglas
+│   ├── arquitetura-infra.md   ← decisões de arquitetura (ADRs)
+│   ├── adr/                   ← Architecture Decision Records
+│   │   └── README.md
+│   ├── 1 - EFD-ICMSIPI-JAN2018.TXT
+│   ├── 2 - EFD-ICMSIPI-FEV2018.TXT
+│   └── 3 - EFD-ICMSIPI-MAR2018.TXT
+│
 ├── backend/
+│   ├── README.md
+│   ├── requirements.txt
+│   ├── alembic.ini
+│   ├── .env.example           ← template de variáveis
+│   ├── .env.production        ← produção (git ignore)
+│   │
 │   ├── app/
-│   │   ├── parsers/           ← parsers de SPED, NF-e XML, CT-e XML, EFD
+│   │   ├── __init__.py
+│   │   ├── main.py            ← entrada FastAPI
+│   │   │
+│   │   ├── core/              ← config, segurança, database
+│   │   │   ├── config.py
+│   │   │   ├── security.py
+│   │   │   ├── database.py
+│   │   │   └── celery_app.py
+│   │   │
+│   │   ├── models/            ← SQLAlchemy ORM
+│   │   │   ├── __init__.py
+│   │   │   ├── user.py
+│   │   │   ├── fiscal_document.py
+│   │   │   ├── ct_document.py
+│   │   │   ├── document.py
+│   │   │   └── rule_log.py
+│   │   │
+│   │   ├── schemas/           ← Pydantic request/response
+│   │   │   ├── __init__.py
+│   │   │   ├── auth.py
+│   │   │   └── documents.py
+│   │   │
+│   │   ├── exceptions/        ← custom exceptions (futuro)
+│   │   │   └── __init__.py
+│   │   │
+│   │   ├── parsers/           ← parsers de arquivos
+│   │   │   ├── __init__.py
+│   │   │   ├── detector.py
+│   │   │   ├── sped_efd_icms.py
+│   │   │   ├── nfe_xml.py
+│   │   │   └── cte_xml.py
+│   │   │
 │   │   ├── validators/        ← motor de regras fiscais
-│   │   ├── ai/                ← detecção de anomalias e scoring
-│   │   ├── api/               ← rotas FastAPI
-│   │   ├── models/            ← modelos SQLAlchemy
-│   │   ├── schemas/           ← schemas Pydantic
-│   │   ├── tasks/             ← tasks Celery
+│   │   │   ├── __init__.py
+│   │   │   └── rules/
+│   │   │       ├── __init__.py
+│   │   │       ├── base.py
+│   │   │       ├── dag.py
+│   │   │       ├── registry.py
+│   │   │       └── fiscal_rules.py
+│   │   │
+│   │   ├── ai/                ← detecção de anomalias, scoring (futuro)
+│   │   │   ├── __init__.py
+│   │   │   └── ...
+│   │   │
 │   │   ├── services/          ← lógica de negócio
-│   │   └── core/              ← config, segurança, middlewares
+│   │   │   ├── __init__.py
+│   │   │   ├── auth_service.py
+│   │   │   ├── document_service.py
+│   │   │   ├── rule_service.py
+│   │   │   ├── scoring_service.py
+│   │   │   └── storage_service.py
+│   │   │
+│   │   ├── api/               ← rotas FastAPI
+│   │   │   ├── __init__.py
+│   │   │   ├── deps.py        ← dependencies
+│   │   │   ├── auth.py
+│   │   │   ├── uploads.py
+│   │   │   ├── documents.py
+│   │   │   └── validation.py
+│   │   │
+│   │   └── tasks/             ← Celery tasks
+│   │       ├── __init__.py
+│   │       ├── parse_document.py
+│   │       └── validate_document.py
+│   │
+│   ├── migrations/            ← Alembic DB migrations
+│   │   ├── versions/
+│   │   └── env.py
+│   │
 │   ├── tests/
+│   │   ├── conftest.py
+│   │   ├── fixtures/          ← EFD samples, test data
+│   │   │   ├── __init__.py
+│   │   │   ├── 1 - EFD-ICMSIPI-JAN2018.TXT
+│   │   │   ├── 2 - EFD-ICMSIPI-FEV2018.TXT
+│   │   │   └── 3 - EFD-ICMSIPI-MAR2018.TXT
 │   │   ├── unit/
 │   │   └── integration/
-│   ├── migrations/            ← Alembic
-│   └── requirements.txt
+│   │
+│   └── Dockerfile
+│
 ├── frontend/
+│   ├── README.md
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   ├── tailwind.config.js
+│   ├── postcss.config.js
+│   ├── .env.example           ← template de variáveis
+│   │
 │   ├── src/
-│   │   ├── pages/
-│   │   ├── components/
-│   │   ├── hooks/
-│   │   └── services/          ← chamadas de API
-│   └── package.json
-└── infra/
-    ├── docker/
-    ├── k8s/
-    └── terraform/
+│   │   ├── main.tsx
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   │
+│   │   ├── pages/             ← telas
+│   │   │   ├── DashboardPage.tsx
+│   │   │   ├── DocumentsPage.tsx
+│   │   │   ├── DocumentDetailPage.tsx
+│   │   │   ├── LoginPage.tsx
+│   │   │   ├── ReportsPage.tsx
+│   │   │   └── SettingsPage.tsx
+│   │   │
+│   │   ├── components/        ← componentes por feature
+│   │   │   ├── ui/            ← componentes primitivos (shadcn)
+│   │   │   ├── layout/        ← layout compartilhado
+│   │   │   ├── dashboard/     ← componentes do dashboard
+│   │   │   ├── documents/     ← componentes de documentos
+│   │   │   └── document-detail/ ← detalhes do documento
+│   │   │
+│   │   ├── hooks/             ← custom React hooks
+│   │   │   ├── usePeriodScore.ts
+│   │   │   ├── useAlertQueue.ts
+│   │   │   ├── useDocuments.ts
+│   │   │   ├── useDocumentScore.ts
+│   │   │   └── useValidationResults.ts
+│   │   │
+│   │   ├── contexts/          ← React contexts
+│   │   │   └── AuthContext.tsx
+│   │   │
+│   │   ├── services/          ← chamadas de API
+│   │   │   └── api.ts
+│   │   │
+│   │   ├── lib/               ← utilitários
+│   │   │   ├── utils.ts
+│   │   │   └── constants.ts   ← (futuro)
+│   │   │
+│   │   ├── types/             ← TypeScript types
+│   │   │   ├── api.ts
+│   │   │   └── auth.ts
+│   │   │
+│   │   └── __tests__/         ← testes colocalizados (futuro)
+│   │       ├── components/
+│   │       └── hooks/
+│   │
+│   ├── public/                ← assets estáticos
+│   │   └── favicon.ico
+│   │
+│   ├── Dockerfile
+│   ├── Dockerfile.prod
+│   └── nginx.conf
+│
+├── infra/                     ← Toda infraestrutura e deployment
+│   ├── README.md
+│   ├── docker-compose.yml     ← dev environment
+│   ├── docker-compose.prod.yml ← produção
+│   │
+│   ├── docker/                ← Dockerfiles centralizados (futuro)
+│   │   ├── backend.Dockerfile
+│   │   ├── frontend.Dockerfile
+│   │   └── .dockerignore
+│   │
+│   ├── scripts/               ← scripts de setup
+│   │   └── setup-easypanel.ps1
+│   │
+│   ├── k8s/                   ← Kubernetes (futuro)
+│   │   └── .gitkeep
+│   │
+│   └── terraform/             ← IaC (futuro)
+│       └── .gitkeep
+│
+├── scripts/                   ← scripts de utilidade
+│   ├── dev-setup.ps1         ← setup automático local (futuro)
+│   ├── lint.sh               ← linting (futuro)
+│   └── test.sh               ← execução de testes (futuro)
+│
+└── .github/                  ← CI/CD (futuro)
+    ├── workflows/
+    │   ├── test.yml          ← testes
+    │   └── deploy.yml        ← deployment
+    └── CODEOWNERS
 ```
 
 ---
@@ -230,12 +391,72 @@ Consulte `docs/epics.md` para detalhes completos.
 
 ---
 
+## Guia de Desenvolvimento
+
+### Iniciando o projeto
+
+#### Backend
+```powershell
+cd backend
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+```
+
+#### Frontend
+```powershell
+cd frontend
+node --version  # verificar se Node.js está instalado
+npm install
+npm run dev
+```
+
+#### Stack Completa (Docker)
+```powershell
+cd infra
+docker-compose up -d
+# Frontend: http://localhost:5173
+# Backend: http://localhost:8000
+# Flower: http://localhost:5555
+```
+
+### Adicionando fixtures de teste
+Coloque arquivos de teste em `backend/tests/fixtures/`:
+- EFD samples em `.TXT`
+- XML NFe/CTe em `.xml`
+- Dados JSON em `.json`
+
+Referencie em testes:
+```python
+def test_parse_efd(fixtures_dir):
+    efd_file = fixtures_dir / "1 - EFD-ICMSIPI-JAN2018.TXT"
+```
+
+### Movendo Dockerfiles (Próximas Fases)
+
+Eventualmente, Dockerfiles serão centralizados em `infra/docker/`:
+```
+# De:
+backend/Dockerfile
+frontend/Dockerfile
+frontend/Dockerfile.prod
+
+# Para:
+infra/docker/backend.Dockerfile
+infra/docker/frontend.Dockerfile
+infra/docker/frontend.prod.Dockerfile
+```
+
+---
+
 ## Regras para o Claude Code
 
 1. **Sempre pergunte antes de criar novos módulos** que não estão na estrutura de pastas definida
 2. **Nunca remova validações fiscais** sem confirmar com o usuário
 3. **Testes são obrigatórios** para qualquer lógica do motor de regras (`validators/`)
-4. **Documente decisões de arquitetura** em `docs/arquitetura.md` quando fizer escolhas relevantes
+4. **Documente decisões de arquitetura** em `docs/adr/` quando fizer escolhas relevantes
 5. **Use os termos do domínio** definidos na seção de nomenclatura acima
-6. **Atualize a tabela de epics** neste arquivo quando uma epic for concluída
+6. **Atualize a tabela de epics** em `docs/epics.md` quando uma epic for concluída
 7. **LGPD:** nenhum dado fiscal do cliente deve ser logado em texto plano — sempre mascarar CNPJ e valores em logs
+8. **Imports de fixtures:** use `backend/tests/fixtures/` para test data, NÃO `docs/`

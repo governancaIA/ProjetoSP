@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Logs
+*.log
+logs/
+
+# Data
+uploads/
+*.db
+*.sqlite
+.minio_data/
+
+# Docker volumes
+postgres_data/
+redis_data/
+minio_data/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Node (frontend)
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# BMAD artifacts
+_bmad/
+_bmad-output/
+
+# Setup/deployment artifacts
+*.swp
+*.tmp
