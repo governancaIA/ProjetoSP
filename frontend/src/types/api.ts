@@ -80,6 +80,32 @@ export interface ValidationResultsResponse {
   results: ValidationResult[]
 }
 
+// ── POST /api/v1/uploads ─────────────────────────────────────────────────────
+
+export interface UploadFileResult {
+  filename: string
+  status: 'accepted' | 'rejected' | 'duplicate' | 'error'
+  document_id?: number
+  job_id?: string
+  file_hash?: string
+  file_size?: number
+  reason?: string
+  message?: string
+}
+
+export interface UploadResponse {
+  tenant_id: string
+  upload_timestamp: string
+  total_files: number
+  results: UploadFileResult[]
+  summary: {
+    accepted: number
+    rejected: number
+    duplicates: number
+    errors: number
+  }
+}
+
 // ── GET /api/v1/documents ─────────────────────────────────────────────────────
 
 export interface Document {

@@ -5,6 +5,7 @@ import type {
   DocumentScoreResponse,
   ValidationResultsResponse,
   DocumentsResponse,
+  UploadResponse,
 } from '@/types/api'
 import type { TokenResponse } from '@/types/auth'
 
@@ -105,7 +106,41 @@ export const fetchValidationResults = (
     .get<ValidationResultsResponse>(`/documents/${id}/validation-results`)
     .then((r) => r.data)
 
-// ── Documents List (stub) ─────────────────────────────────────────────────────
+// ── Documents List ────────────────────────────────────────────────────────────
 
 export const fetchDocuments = (): Promise<DocumentsResponse> =>
   client.get<DocumentsResponse>('/documents').then((r) => r.data)
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+
+export const uploadFiles = (
+  files: File[],
+  onProgress?: (percent: number) => void
+): Promise<UploadResponse> => {
+  const formData = new FormData()
+  files.forEach((f) => formData.append('files', f))
+
+  return client
+    .post<UploadResponse>('/uploads', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120_000,
+      onUploadProgress: (event) => {
+        if (onProgress && event.total) {
+          onProgress(Math.round((event.loaded * 100) / event.total))
+        }
+      },
+    })
+    .then((r) => r.data)
+}
+
+// ── Job Status ────────────────────────────────────────────────────────────────
+
+export interface JobStatusResponse {
+  job_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  document_id?: number
+  error?: string
+}
+
+export const fetchJobStatus = (jobId: string): Promise<JobStatusResponse> =>
+  client.get<JobStatusResponse>(`/jobs/${jobId}`).then((r) => r.data)

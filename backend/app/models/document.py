@@ -42,6 +42,7 @@ class Document(Base):
     # Status
     processing_status = Column(String(50), default="pending")  # pending, processing, completed, failed
     processing_error = Column(Text, nullable=True)
+    celery_task_id = Column(String(255), nullable=True, index=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, index=True)

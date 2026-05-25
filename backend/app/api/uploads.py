@@ -180,12 +180,14 @@ async def upload_files(
                     storage_bucket=storage.bucket,
                 )
 
-                db.commit()
-                logger.info(f"Created Document record: id={doc.id}")
-
                 # Enqueue parsing task
                 task = parse_document.delay(doc.id, tenant_id)
                 logger.info(f"Enqueued parse_document task: {task.id} for document {doc.id}")
+
+                # Save task_id for job status polling
+                doc.celery_task_id = task.id
+                db.commit()
+                logger.info(f"Created Document record: id={doc.id}")
 
                 results.append({
                     "filename": file.filename,

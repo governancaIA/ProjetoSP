@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api import uploads, documents, validation, auth
+from app.api import uploads, documents, validation, auth, jobs
 
 # Create database tables on startup
 @asynccontextmanager
@@ -41,6 +41,7 @@ app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(uploads.router, prefix="/api/v1", tags=["uploads"])
 app.include_router(documents.router, prefix="/api/v1", tags=["documents"])
 app.include_router(validation.router, prefix="/api/v1", tags=["validation"])
+app.include_router(jobs.router, prefix="/api/v1", tags=["jobs"])
 
 @app.get("/")
 async def root():
