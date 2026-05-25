@@ -10,7 +10,7 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - VITE_API_URL=https://adriner.fr/fiscalia/api/v1
+      - VITE_API_URL=http://adriner.fr:8080/fiscalia/api/v1
       - NODE_ENV=production
     restart: always
     networks:
