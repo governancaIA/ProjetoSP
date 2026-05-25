@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type {
   AlertQueueResponse,
+  AlertsListResponse,
   PeriodScoreResponse,
   DocumentScoreResponse,
   ValidationResultsResponse,
@@ -80,6 +81,22 @@ export const fetchAlertQueue = (limit = 10): Promise<AlertQueueResponse> =>
     .get<AlertQueueResponse>('/alerts/priority-queue', {
       params: { limit },
     })
+    .then((r) => r.data)
+
+export interface AlertsFilter {
+  severity?: string[]
+  rule_id?: string
+  fiscal_year?: number
+  fiscal_month?: number
+  min_exposure?: number
+  max_exposure?: number
+  page?: number
+  page_size?: number
+}
+
+export const fetchAlerts = (filter: AlertsFilter = {}): Promise<AlertsListResponse> =>
+  client
+    .get<AlertsListResponse>('/alerts', { params: filter })
     .then((r) => r.data)
 
 // ── Period Score ──────────────────────────────────────────────────────────────

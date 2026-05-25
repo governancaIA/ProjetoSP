@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { BarChart3, FileText, LogOut, PieChart, Settings } from 'lucide-react'
+import { AlertTriangle, BarChart3, FileText, LogOut, PieChart, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ export function Sidebar() {
   const links = [
     { href: '/', label: 'Dashboard', icon: BarChart3 },
     { href: '/documents', label: 'Documentos', icon: FileText },
+    { href: '/alerts', label: 'Alertas', icon: AlertTriangle },
     { href: '/reports', label: 'Relatórios', icon: PieChart },
     { href: '/settings', label: 'Configurações', icon: Settings },
   ]

@@ -1,13 +1,15 @@
 """
-Validation and scoring endpoints (US-2.1, US-4.1)
+Validation and scoring endpoints (US-2.1, US-4.1, US-5.2)
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
+from typing import Optional, List
 
 from app.core.database import get_db, set_tenant_schema
 from app.api.deps import get_current_user
 from app.models.user import User
-from app.services.scoring_service import ScoringService
+from app.services.scoring_service import ScoringService, AlertSeverity
 
 router = APIRouter()
 
@@ -129,6 +131,102 @@ async def get_period_score(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _mask_chave_acesso(chave: str | None) -> str | None:
+    """Mask CNPJ digits (positions 7-20) in NF-e access key per LGPD Art. 46."""
+    if not chave or len(chave) < 20:
+        return chave
+    return chave[:6] + "***CNPJ***" + chave[20:]
+
+
+@router.get("/alerts")
+async def list_alerts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    severity: Optional[List[str]] = Query(None),
+    rule_id: Optional[str] = None,
+    fiscal_year: Optional[int] = None,
+    fiscal_month: Optional[int] = None,
+    min_exposure: Optional[float] = None,
+    max_exposure: Optional[float] = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """
+    List alerts with advanced filters and SQL pagination.
+
+    Severity and exposure are computed in Python (not stored in DB), so
+    filtering on those fields happens after SQL fetch, within a page.
+    For best results, combine with period/rule filters to narrow the SQL set.
+    """
+    from app.models.rule_log import RuleExecutionLog
+    from app.models.fiscal_document import FiscalDocument
+
+    page_size = min(page_size, 200)
+    tenant_id = current_user.tenant_id
+
+    query = (
+        db.query(RuleExecutionLog, FiscalDocument)
+        .join(FiscalDocument, RuleExecutionLog.fiscal_document_id == FiscalDocument.id)
+        .filter(
+            RuleExecutionLog.tenant_id == tenant_id,
+            RuleExecutionLog.passed == False,
+        )
+    )
+
+    if rule_id:
+        query = query.filter(RuleExecutionLog.rule_id == rule_id)
+
+    if fiscal_year and fiscal_month:
+        query = query.filter(
+            FiscalDocument.fiscal_year == fiscal_year,
+            FiscalDocument.fiscal_month == fiscal_month,
+        )
+    elif fiscal_year:
+        query = query.filter(FiscalDocument.fiscal_year == fiscal_year)
+
+    total_unfiltered = query.count()
+    rows = (
+        query.order_by(RuleExecutionLog.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    alerts = []
+    for log, doc in rows:
+        alert_severity, exposure = ScoringService.calculate_alert_severity(log, doc)
+
+        if severity and alert_severity.value not in severity:
+            continue
+        if min_exposure is not None and float(exposure) < min_exposure:
+            continue
+        if max_exposure is not None and float(exposure) > max_exposure:
+            continue
+
+        alerts.append({
+            "alert_id": log.id,
+            "rule_id": log.rule_id,
+            "rule_version": log.rule_version,
+            "severity": alert_severity.value,
+            "fiscal_document_id": doc.id,
+            "document_chave": _mask_chave_acesso(doc.chave_acesso),
+            "document_value": float(doc.valor_total or 0),
+            "emitente_nome": doc.emitente_nome,
+            "data_emissao": doc.data_emissao.isoformat() if doc.data_emissao else None,
+            "exposure": float(exposure),
+            "message": log.message,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        })
+
+    return {
+        "alerts": alerts,
+        "total": total_unfiltered,
+        "page": page,
+        "page_size": page_size,
+        "pages": (total_unfiltered + page_size - 1) // page_size,
+    }
 
 
 @router.get("/alerts/priority-queue")

@@ -7,6 +7,7 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { DocumentsPage } from '@/pages/DocumentsPage'
 import { DocumentDetailPage } from '@/pages/DocumentDetailPage'
 import { LoginPage } from '@/pages/LoginPage'
+import { AlertsPage } from '@/pages/AlertsPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 
@@ -38,6 +39,7 @@ export default function App() {
                       <Route path="/" element={<DashboardPage />} />
                       <Route path="/documents" element={<DocumentsPage />} />
                       <Route path="/documents/:id" element={<DocumentDetailPage />} />
+                      <Route path="/alerts" element={<AlertsPage />} />
                       <Route path="/reports" element={<ReportsPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
                       <Route path="*" element={<Navigate to="/" replace />} />

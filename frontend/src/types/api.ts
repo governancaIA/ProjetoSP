@@ -80,6 +80,31 @@ export interface ValidationResultsResponse {
   results: ValidationResult[]
 }
 
+// ── GET /api/v1/alerts ───────────────────────────────────────────────────────
+
+export interface AlertDetail {
+  alert_id: number
+  rule_id: string
+  rule_version: string
+  severity: Severity
+  fiscal_document_id: number
+  document_chave: string | null
+  document_value: number
+  emitente_nome: string | null
+  data_emissao: string | null
+  exposure: number
+  message: string | null
+  created_at: string | null
+}
+
+export interface AlertsListResponse {
+  alerts: AlertDetail[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
 // ── POST /api/v1/uploads ─────────────────────────────────────────────────────
 
 export interface UploadFileResult {
