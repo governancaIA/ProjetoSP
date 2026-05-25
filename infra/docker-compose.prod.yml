@@ -8,9 +8,9 @@ services:
       dockerfile: Dockerfile.prod
     container_name: fiscalai-frontend
     ports:
-      - "5000:5000"
+      - "5173:5173"
     environment:
-      - VITE_API_URL=http://adriner.fr:8080/fiscalia/api/v1
+      - VITE_API_URL=https://adriner.fr/fiscalia/api/v1
       - NODE_ENV=production
     restart: always
     networks:
@@ -43,9 +43,9 @@ services:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=FiscalAI#MinIO2026!@Secure
       - MINIO_BUCKET=fiscalai-documents
-      - CORS_ORIGINS=https://adriner.fr,http://localhost:5173
+      - CORS_ORIGINS=https://adriner.fr,http://localhost:5173,http://localhost:8000
       - SECRET_KEY=k8xAmP9xvQ2rL5xnJ4wH7cF3bG6yT1Z
-      - ALLOWED_HOSTS=adriner.fr,backend,localhost
+      - ALLOWED_HOSTS=adriner.fr,backend,localhost,127.0.0.1
       - LOG_LEVEL=INFO
     depends_on:
       postgres:
