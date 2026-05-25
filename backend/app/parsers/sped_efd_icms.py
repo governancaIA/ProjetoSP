@@ -232,7 +232,7 @@ class SPEDParser:
         }
 
         lines = content.split('\n')
-        current_c100_idx = None
+        current_c100: Dict[str, Any] | None = None
 
         for line_num, line in enumerate(lines, start=1):
             line = line.strip()
@@ -265,16 +265,21 @@ class SPEDParser:
 
                 if record_type == "C100":
                     record = C100Record.parse(data_fields)
+                    record["items"] = []  # C170 filhos serão adicionados aqui
                     result["C100"].append(record)
-                    current_c100_idx = len(result["C100"]) - 1
+                    current_c100 = record
 
                 elif record_type == "C170":
                     record = C170Record.parse(data_fields)
                     result["C170"].append(record)
+                    # Associa ao C100 pai atual (relação hierárquica do SPED)
+                    if current_c100 is not None:
+                        current_c100["items"].append(record)
 
                 elif record_type == "D100":
                     record = D100Record.parse(data_fields)
                     result["D100"].append(record)
+                    current_c100 = None  # D100 encerra o bloco C
 
                 elif record_type == "E110":
                     record = E110Record.parse(data_fields)

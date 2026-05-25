@@ -11,6 +11,7 @@ from app.models.fiscal_document import FiscalDocument
 from app.models.rule_log import SeverityLevel
 from app.validators.rules.dag import RuleDAG
 from app.validators.rules.registry import get_active_rules
+import app.validators.rules.fiscal_rules  # noqa: F401 — registra as regras no registry
 from app.services.rule_service import RuleService, RuleServiceError
 
 

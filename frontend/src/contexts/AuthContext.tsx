@@ -24,18 +24,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Carrega tokens do localStorage ao montar
+  // Carrega tokens do localStorage ao montar e reidrata o usuário via GET /me
   useEffect(() => {
     const storedToken = localStorage.getItem(TOKEN_KEY)
     const storedRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
 
-    if (storedToken) {
-      setToken(storedToken)
-      setRefreshToken(storedRefreshToken)
-      // Não carregar user aqui - deixar api.ts com interceptor carregar via GET /me
+    if (!storedToken) {
+      setIsLoading(false)
+      return
     }
 
-    setIsLoading(false)
+    setToken(storedToken)
+    setRefreshToken(storedRefreshToken)
+
+    // Reidrata o usuário para que isAuthenticated seja true após reload
+    fetch('/api/v1/auth/me', {
+      headers: { 'Authorization': `Bearer ${storedToken}` },
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('token inválido')
+        return res.json()
+      })
+      .then((userData: UserOut) => {
+        setUser(userData)
+      })
+      .catch(() => {
+        // Token expirado ou inválido — limpa tudo
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem(REFRESH_TOKEN_KEY)
+        setToken(null)
+        setRefreshToken(null)
+      })
+      .finally(() => {
+        setIsLoading(false)
+      })
   }, [])
 
   const login = async (email: string, password: string) => {

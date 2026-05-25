@@ -145,8 +145,8 @@ class DocumentService:
                 db.add(fiscal_doc)
                 db.flush()
 
-                # Add items (C170) linked to this document
-                c170_list = parsed_sped.get("C170", [])
+                # Add items (C170) — usa apenas os itens do C100 pai (hierarquia SPED)
+                c170_list = c100.get("items", [])
                 for item_idx, c170 in enumerate(c170_list, start=1):
                     item = FiscalItem(
                         tenant_id=tenant_id,
