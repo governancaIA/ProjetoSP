@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,7 +36,7 @@ export function SettingsPage() {
   };
 
   return (
-    <AppShell title="Configurações">
+    <AppShell>
       <div className="space-y-6 max-w-2xl">
         {/* Perfil */}
         <Card className="p-6">
