@@ -10,7 +10,7 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - VITE_API_URL=https://seu-dominio.com/api/v1
+      - VITE_API_URL=https://genialidadecriativa.main.tld/api/v1
       - NODE_ENV=production
     restart: always
     networks:
@@ -28,24 +28,24 @@ services:
   backend:
     build:
       context: ../backend
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
     container_name: fiscalai-backend
     ports:
       - "8000:8000"
     environment:
       - ENV=production
       - DEBUG=False
-      - DATABASE_URL=postgresql://fiscalai_user:fiscalai_password@postgres:5432/fiscalai_db
+      - DATABASE_URL=postgresql://fiscalai_user:FiscalAI#Postgres2026!@postgres:5432/fiscalai_db
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin_password
+      - MINIO_ROOT_PASSWORD=FiscalAI#MinIO2026!@Secure
       - MINIO_BUCKET=fiscalai-documents
-      - CORS_ORIGINS=https://seu-dominio.com,https://www.seu-dominio.com,http://localhost:5173
-      - SECRET_KEY=change-me-in-production-use-32-random-chars
-      - ALLOWED_HOSTS=seu-dominio.com,www.seu-dominio.com,backend,localhost
+      - CORS_ORIGINS=https://genialidadecriativa.main.tld,https://www.genialidadecriativa.main.tld,http://localhost:5173
+      - SECRET_KEY=k8x!@mP9$vQ2rL5&nJ4wH7cF3bG6yT1Z
+      - ALLOWED_HOSTS=genialidadecriativa.main.tld,www.genialidadecriativa.main.tld,backend,localhost
       - LOG_LEVEL=INFO
     depends_on:
       postgres:
@@ -70,19 +70,19 @@ services:
   celery_worker:
     build:
       context: ../backend
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
     container_name: fiscalai-celery-worker
     command: celery -A app.tasks worker --loglevel=info --concurrency=4
     environment:
       - ENV=production
       - DEBUG=False
-      - DATABASE_URL=postgresql://fiscalai_user:fiscalai_password@postgres:5432/fiscalai_db
+      - DATABASE_URL=postgresql://fiscalai_user:FiscalAI#Postgres2026!@postgres:5432/fiscalai_db
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin_password
+      - MINIO_ROOT_PASSWORD=FiscalAI#MinIO2026!@Secure
       - MINIO_BUCKET=fiscalai-documents
       - LOG_LEVEL=INFO
     depends_on:
@@ -98,7 +98,7 @@ services:
   flower:
     build:
       context: ../backend
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
     container_name: fiscalai-flower
     command: celery -A app.tasks flower --port=5555
     ports:
@@ -164,7 +164,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin_password
-      MINIO_BROWSER_REDIRECT_URL: https://seu-dominio.com/minio
+      MINIO_BROWSER_REDIRECT_URL: https://genialidadecriativa.main.tld/minio
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
