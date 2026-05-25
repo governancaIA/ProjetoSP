@@ -1,15 +1,33 @@
-# 🚀 Deploy FiscalAI via SSH na Hostinger
+# 🚀 Deploy Seguro FiscalAI na Hostinger
 
-**VPS:** genialidadecriativa.main.tld (89.116.214.246)  
+**VPS:** adriner.fr (89.116.214.246)  
 **Provedor:** Hostinger KVM 2  
 **Usuário:** root  
-**Status:** ✅ Em atividade até 2026-06-30
+**URL FiscalAI:** https://adriner.fr/fiscalia  
+**Status:** ✅ Pronto para deploy
+
+---
+
+## 🔒 RESUMO EXECUTIVO
+
+### ✅ O que vai acontecer:
+- FiscalAI roda em `/fiscalia` apenas
+- SSL compartilhado com `adriner.fr`
+- Site original **NÃO É TOCADO**
+- Seu pai configura depois qual servidor usar para o resto
+
+### 🛡️ Isolamento:
+```
+https://adriner.fr/
+├─ /fiscalia ────────→ FiscalAI (NOSSA SOLUÇÃO)
+└─ / ───────────────→ Site original (DO SEU PAI)
+```
 
 ---
 
 ## 🔐 PASSO 1: Conectar via SSH
 
-### No Windows (PowerShell como Administrador)
+### No Windows (PowerShell)
 ```powershell
 ssh -i $env:USERPROFILE\.ssh\id_ed25519 root@89.116.214.246
 ```
@@ -23,209 +41,144 @@ ssh -i ~/.ssh/id_ed25519 root@89.116.214.246
 
 ---
 
-## ✅ PASSO 2: Verificar Ambiente da Hostinger
-
-Após conectar, verifique o que já está instalado:
+## ✅ PASSO 2: Verificar Ambiente
 
 ```bash
-# Verificar versão do sistema
-cat /etc/os-release
-
-# Verificar se Docker está instalado
 docker --version
-
-# Verificar se Git está instalado
 git --version
-
-# Verificar se Python está instalado
 python3 --version
 ```
 
-**Se faltarem**, instale:
-
+Se faltar algo:
 ```bash
-# Atualizar sistema
 apt-get update && apt-get upgrade -y
-
-# Instalar Docker
-apt-get install -y docker.io docker-compose
-
-# Instalar Git e Python
-apt-get install -y git python3 python3-pip curl wget
-
-# Iniciar Docker
-systemctl start docker
-systemctl enable docker
+apt-get install -y docker.io curl git python3 python3-pip wget
+systemctl start docker && systemctl enable docker
 ```
 
 ---
 
-## 📂 PASSO 3: Clonar o Repositório
+## 📂 PASSO 3: Clonar Repositório
 
 ```bash
-# Criar diretório
 mkdir -p /opt
 cd /opt
-
-# Clonar repositório
 git clone https://github.com/governancaIA/ProjetoSP.git fiscalai
 cd fiscalai
 ```
 
 ---
 
-## ⚙️ PASSO 4: Variáveis de Ambiente (Já Configuradas)
+## 🐳 PASSO 4: Deploy Automático (Recomendado)
 
-✅ **As variáveis já foram configuradas no seu repositório local!**
-
-O arquivo `.env.production` já contém:
-- ✅ `DATABASE_URL` com senha segura
-- ✅ `MINIO_ROOT_PASSWORD` com senha segura
-- ✅ `SECRET_KEY` com 32 caracteres aleatórios
-- ✅ `CORS_ORIGINS` configurado para genialidadecriativa.main.tld
-- ✅ SMTP configurado com seu email Gmail
-
-**Você só precisa adicionar o token Gmail:**
+Execute este bloco **completo** na VPS:
 
 ```bash
+cd /tmp && cat > deploy_safe.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "🚀 DEPLOY SEGURO FISCALAI - https://adriner.fr/fiscalia"
+
+# 1. Atualizar Docker Compose para v2
+apt-get update -qq && apt-get install -y -qq curl
+apt-get remove -y docker-compose 2>/dev/null || true
+curl -sL "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+echo "✅ Docker Compose v2 instalado"
+
+# 2. Limpar containers antigos
+cd /opt/fiscalai/infra
+docker-compose -f docker-compose.prod.yml kill 2>/dev/null || true
+docker-compose -f docker-compose.prod.yml down --volumes --remove-orphans 2>/dev/null || true
+docker container prune -f 2>/dev/null || true
+docker image prune -a -f 2>/dev/null || true
+docker volume prune -f 2>/dev/null || true
+docker rm -f fiscalai-frontend fiscalai-backend fiscalai-celery-worker fiscalai-celery-beat fiscalai-flower fiscalai-postgres fiscalai-redis fiscalai-minio 2>/dev/null || true
+echo "✅ Limpeza completa"
+
+# 3. Atualizar código
+cd /opt/fiscalai
+git pull origin main
+echo "✅ Código atualizado"
+
+# 4. Build (15-20 min)
 cd infra
-nano .env.production
-```
+echo "⏳ Build Docker (pode levar 15-20 minutos)..."
+docker-compose -f docker-compose.prod.yml build --no-cache --pull 2>&1 | tail -10
+echo "✅ Build completo"
 
-Procure a linha:
-```
-SMTP_PASSWORD=ilxy qili bnoc bnpy
-```
-
-**O token está aqui!** ⬆️ (já foi gerado e colocado no arquivo)
-
-Se precisar trocar, acesse https://myaccount.google.com/apppasswords e gere um novo.
-
-**Como editar no nano:**
-1. Use `Ctrl+W` para buscar `SMTP_PASSWORD`
-2. Confirme que o token está lá
-3. Pressione `Ctrl+X` para sair
-4. Pressione `Y` para sim
-5. Pressione `Enter` para salvar
-
----
-
-## 🐳 PASSO 5: Build e Deploy com Docker
-
-```bash
-# Ainda no diretório /opt/fiscalai/infra
-
-# Build das imagens (pode levar 10-15 min)
-docker-compose -f docker-compose.prod.yml build
-
-# Iniciar containers
+# 5. Iniciar stack
 docker-compose -f docker-compose.prod.yml up -d
+echo "⏳ Aguardando 3 minutos para PostgreSQL..."
+sleep 180
+echo "✅ Stack iniciado"
 
-# Verificar status
+# 6. Status
 docker-compose -f docker-compose.prod.yml ps
-```
 
-**Output esperado:**
-```
-NAME                    STATUS              PORTS
-fiscalai-postgres       Up 2 minutes        5432/tcp
-fiscalai-redis          Up 2 minutes        6379/tcp
-fiscalai-minio          Up 2 minutes        9000/tcp, 9001/tcp
-fiscalai-backend        Up 1 minute         8000/tcp
-fiscalai-frontend       Up 1 minute         5000/tcp
-fiscalai-celery-worker  Up 1 minute         
-fiscalai-celery-beat    Up 1 minute         
-fiscalai-flower         Up 1 minute         5555/tcp
-```
+# 7. SSL
+apt-get install -y -qq certbot python3-certbot-nginx
+if [ ! -f "/etc/letsencrypt/live/adriner.fr/fullchain.pem" ]; then
+    echo "⚠️  Gerando certificado SSL..."
+    certbot certonly --standalone -d adriner.fr --non-interactive --agree-tos --email admin@adriner.fr 2>/dev/null || true
+fi
+echo "✅ SSL configurado"
 
-⏳ **Aguarde 2-3 minutos** para todos os containers ficarem saudáveis. O PostgreSQL precisa se inicializar.
+# 8. Nginx (SEGURO - não mexe no site original)
+apt-get install -y -qq nginx
 
-Se algum container ficar em `Exited`, veja os logs:
-```bash
-docker-compose -f docker-compose.prod.yml logs backend
-```
+cat > /etc/nginx/sites-available/fiscalai-only <<'NGINX_EOF'
+upstream backend { server localhost:8000; }
+upstream frontend { server localhost:5173; }
 
----
-
-## 🌐 PASSO 6: Configurar Domínio e SSL
-
-### ✅ Domínio já aponta para o VPS
-
-Seu domínio `genialidadecriativa.main.tld` já está configurado para apontar para **89.116.214.246** no painel Hostinger.
-
-### Gerar Certificado SSL (Let's Encrypt)
-
-```bash
-# Instalar Certbot
-apt-get install -y certbot python3-certbot-nginx
-
-# Gerar certificado (pode levar 2-3 min)
-certbot certonly --standalone -d genialidadecriativa.main.tld
-
-# Responda às perguntas:
-# Email: seu@email.com
-# Aceite os termos: Y
-```
-
-**Certificado será salvo em:**
-```
-/etc/letsencrypt/live/genialidadecriativa.main.tld/
-```
-
----
-
-## 🌐 PASSO 7: Instalar Nginx (Reverse Proxy)
-
-```bash
-# Instalar Nginx
-apt-get install -y nginx
-
-# Criar arquivo de configuração
-cat > /etc/nginx/sites-available/fiscalai <<'EOF'
-upstream backend {
-    server localhost:8000;
-}
-
-upstream frontend {
-    server localhost:5173;
-}
-
-# Redirecionar HTTP para HTTPS
+# HTTP
 server {
     listen 80;
-    server_name genialidadecriativa.main.tld;
-    return 301 https://$server_name$request_uri;
+    server_name adriner.fr www.adriner.fr;
+
+    # FiscalAI redireciona para HTTPS
+    location /fiscalia {
+        return 301 https://$server_name$request_uri;
+    }
+
+    # TUDO MAIS passa para o site original (seu pai configura depois)
+    location / {
+        # Deixe vazio por enquanto
+        # Seu pai adiciona: proxy_pass http://seu-site;
+    }
 }
 
 # HTTPS
 server {
     listen 443 ssl http2;
-    server_name genialidadecriativa.main.tld;
+    server_name adriner.fr www.adriner.fr;
 
-    # Certificado SSL
-    ssl_certificate /etc/letsencrypt/live/genialidadecriativa.main.tld/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/genialidadecriativa.main.tld/privkey.pem;
-
-    # Melhorias de segurança
+    ssl_certificate /etc/letsencrypt/live/adriner.fr/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/adriner.fr/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
-
-    # Tamanho máximo de upload
     client_max_body_size 100M;
 
-    # Frontend (React) - raiz
-    location / {
-        proxy_pass http://frontend;
+    # ===== FiscalAI em /fiscalia/ =====
+
+    location = /fiscalia {
+        return 301 /fiscalia/;
+    }
+
+    location /fiscalia/ {
+        proxy_pass http://frontend/;
+        proxy_buffering off;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Backend API
-    location /api/ {
-        proxy_pass http://backend;
+    location /fiscalia/api/ {
+        proxy_pass http://backend/api/;
+        proxy_buffering off;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -233,281 +186,242 @@ server {
         proxy_read_timeout 300s;
     }
 
-    # Flower (Celery Monitoring)
-    location /flower/ {
-        proxy_pass http://localhost:5555;
+    location /fiscalia/flower/ {
+        proxy_pass http://localhost:5555/;
+        proxy_buffering off;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # MinIO Console
-    location /minio/ {
-        proxy_pass http://localhost:9001;
+    location /fiscalia/minio/ {
+        proxy_pass http://localhost:9001/;
+        proxy_buffering off;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /fiscalia/health {
+        proxy_pass http://backend/health;
+        proxy_set_header Host $host;
+    }
+
+    # ===== RESTO DO SITE (seu pai configura depois) =====
+    location / {
+        # Deixe vazio ou adicione depois:
+        # proxy_pass http://seu-site-original;
     }
 }
-EOF
+NGINX_EOF
 
-# Ativar configuração
-ln -s /etc/nginx/sites-available/fiscalai /etc/nginx/sites-enabled/
-
-# Testar configuração
+rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+ln -sf /etc/nginx/sites-available/fiscalai-only /etc/nginx/sites-enabled/
 nginx -t
-
-# Reiniciar Nginx
 systemctl restart nginx
 systemctl enable nginx
+echo "✅ Nginx configurado (SEGURO)"
+
+# 9. Status final
+echo ""
+echo "=========================================="
+echo "✅ DEPLOYMENT SEGURO COMPLETO!"
+echo "=========================================="
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml ps
+echo ""
+echo "🌐 Acesse: https://adriner.fr/fiscalia"
+echo ""
+echo "🔗 Outros serviços:"
+echo "   - API Docs: https://adriner.fr/fiscalia/api/docs"
+echo "   - Flower: https://adriner.fr/fiscalia/flower"
+echo "   - MinIO: https://adriner.fr/fiscalia/minio"
+echo ""
+echo "⚠️  Seu pai configura o resto do site em:"
+echo "   /etc/nginx/sites-available/fiscalai-only"
+echo "=========================================="
+EOF
+chmod +x deploy_safe.sh && bash deploy_safe.sh
 ```
 
 ---
 
-## ✅ PASSO 8: Verificar Tudo Está Funcionando
+## 📋 Passo a Passo Manual (Se Preferir)
+
+Se o bloco anterior não funcionar, execute linha por linha:
+
+### 4a. Atualizar Docker Compose
+```bash
+apt-get update && apt-get install -y curl
+apt-get remove -y docker-compose
+curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+docker-compose --version
+```
+
+### 4b. Limpar e Build
+```bash
+cd /opt/fiscalai/infra
+docker-compose -f docker-compose.prod.yml down -v 2>/dev/null || true
+docker system prune -f
+docker-compose -f docker-compose.prod.yml build --no-cache
+```
+
+### 4c. Iniciar Stack
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+sleep 180
+docker-compose -f docker-compose.prod.yml ps
+```
+
+### 4d. SSL
+```bash
+apt-get install -y certbot python3-certbot-nginx
+certbot certonly --standalone -d adriner.fr
+```
+
+### 4e. Nginx (copia o bloco de config acima)
+```bash
+apt-get install -y nginx
+# ... (copie a config NGINX_EOF de cima)
+systemctl restart nginx
+```
+
+---
+
+## ✅ Verificação Final
 
 ```bash
-# Verificar Docker containers
+# Ver status dos containers
 docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml ps
 
-# Verificar Nginx
-systemctl status nginx
+# Ver logs (se houver erro)
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml logs -f backend
 
-# Testar conectividade
-curl https://genialidadecriativa.main.tld
-
-# Ver logs do backend
-docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml logs backend
+# Testar FiscalAI
+curl https://adriner.fr/fiscalia
+curl https://adriner.fr/fiscalia/api/v1/health
 ```
 
 ---
 
-## 🎉 Acessar o FiscalAI
+## 🎉 Acessar FiscalAI
 
 | Serviço | URL |
 |---------|-----|
-| **Frontend** | https://genialidadecriativa.main.tld |
-| **Backend API** | https://genialidadecriativa.main.tld/api |
-| **Swagger Docs** | https://genialidadecriativa.main.tld/api/docs |
-| **Flower (Celery)** | https://genialidadecriativa.main.tld/flower |
-| **MinIO Console** | https://genialidadecriativa.main.tld/minio |
+| **Frontend** | https://adriner.fr/fiscalia |
+| **API Docs** | https://adriner.fr/fiscalia/api/docs |
+| **Flower** | https://adriner.fr/fiscalia/flower |
+| **MinIO** | https://adriner.fr/fiscalia/minio |
+| **Health** | https://adriner.fr/fiscalia/health |
 
 ---
 
-## 📊 Comandos Úteis do Dia a Dia
+## 🛡️ Segurança - Site Original
 
-### Ver Logs em Tempo Real
-```bash
-cd /opt/fiscalai/infra
+**Seu pai precisa fazer:**
 
-# Todos os containers
-docker-compose -f docker-compose.prod.yml logs -f
+1. Editar: `/etc/nginx/sites-available/fiscalai-only`
+2. Nas seções `location /` (HTTP e HTTPS)
+3. Adicionar sua configuração:
 
-# Apenas backend
-docker-compose -f docker-compose.prod.yml logs -f backend
+```nginx
+# Opção A: Proxy para outro servidor
+proxy_pass http://seu-site-original:porta;
 
-# Apenas database
-docker-compose -f docker-compose.prod.yml logs -f postgres
+# Opção B: Servir arquivos locais
+root /var/www/seu-site;
+try_files $uri $uri/ /index.html;
+
+# Opção C: Retornar erro por enquanto
+return 404;
 ```
 
-### Parar/Reiniciar Serviços
+4. Reiniciar Nginx:
 ```bash
-cd /opt/fiscalai/infra
-
-# Parar todos
-docker-compose -f docker-compose.prod.yml down
-
-# Reiniciar um container específico
-docker-compose -f docker-compose.prod.yml restart backend
-
-# Reiniciar todos
-docker-compose -f docker-compose.prod.yml restart
+nginx -t
+systemctl restart nginx
 ```
 
-### Atualizar Código
+---
 
+## 📊 Monitoramento do Dia a Dia
+
+### Ver logs em tempo real
+```bash
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml logs -f
+```
+
+### Reiniciar um serviço
+```bash
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml restart backend
+```
+
+### Atualizar código
 ```bash
 cd /opt/fiscalai
-
-# Atualizar repositório
 git pull origin main
-
-# Reconstruir imagens
 cd infra
-docker-compose -f docker-compose.prod.yml build
-
-# Reiniciar containers
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d --build
 ```
 
-### Backup do Banco de Dados
-
+### Backup do banco
 ```bash
-cd /opt/fiscalai/infra
-
-# Backup PostgreSQL
-docker-compose -f docker-compose.prod.yml exec -T postgres pg_dump \
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml exec -T postgres pg_dump \
   -U fiscalai_user fiscalai_db > /opt/backups/db_$(date +%Y%m%d_%H%M%S).sql
-
-# Listar backups
-ls -lh /opt/backups/
 ```
 
 ---
 
 ## 🆘 Troubleshooting
 
-### ❌ "Docker command not found"
+### Porta 8000 em uso
 ```bash
-# Instalar Docker
-apt-get install -y docker.io docker-compose
-systemctl start docker
-```
-
-### ❌ "Port 8000 already in use"
-```bash
-# Ver o que está usando a porta
 lsof -i :8000
-
-# Parar o processo (substitua PID)
-kill -9 PID
+kill -9 <PID>
 ```
 
-### ❌ "SSL certificate error"
+### Containers não iniciam
 ```bash
-# Verificar certificado
-certbot certificates
-
-# Renovar manualmente
-certbot renew --force-renewal
-
-# Reiniciar Nginx
-systemctl restart nginx
-```
-
-### ❌ "Database connection refused"
-```bash
-# Verificar container postgres
 docker-compose -f docker-compose.prod.yml logs postgres
-
-# Reiniciar database
 docker-compose -f docker-compose.prod.yml restart postgres
-
-# Aguarde 30 segundos e reinicie backend
 sleep 30
 docker-compose -f docker-compose.prod.yml restart backend
 ```
 
-### ❌ "Frontend não carrega"
+### SSL error
 ```bash
-# Limpar cache do navegador (Ctrl+Shift+Delete)
-# Ou acessar em modo anônimo
+certbot certificates
+certbot renew --force-renewal
+systemctl reload nginx
+```
 
-# Verificar logs
-docker-compose -f docker-compose.prod.yml logs frontend
-
-# Reconstruir
-docker-compose -f docker-compose.prod.yml build frontend
-docker-compose -f docker-compose.prod.yml up -d frontend
+### Nginx error
+```bash
+nginx -t
+systemctl reload nginx
 ```
 
 ---
 
-## 🔄 Renovação Automática de SSL
+## 🔄 Auto-renovação de SSL
 
 ```bash
-# Criar cron job para renovação automática
 crontab -e
-
-# Adicionar esta linha:
+# Adicione:
 0 3 * * * certbot renew --quiet && systemctl reload nginx
 ```
 
 ---
 
-## 📈 Monitoramento
+## 📞 Suporte
 
-### Ver Uso de Recursos
-```bash
-# CPU e Memória
-docker stats
-
-# Espaço em disco
-df -h
-
-# Espaço Docker
-docker system df
-```
-
-### Limpar Espaço
-```bash
-# Remover imagens não usadas
-docker image prune -a
-
-# Remover volumes não usados
-docker volume prune
-
-# Limpeza completa
-docker system prune -a --volumes
-```
+- **Painel Hostinger:** https://hpanel.hostinger.com
+- **Logs VPS:** `docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml logs`
+- **Nginx config:** `/etc/nginx/sites-available/fiscalai-only`
 
 ---
 
-## 🔐 Segurança - Checklist
-
-- [ ] Alterar todas as senhas padrão em `.env.production`
-- [ ] Ativar firewall UFW
-- [ ] Configurar SSH com chaves (já feito)
-- [ ] Desabilitar root login direto (opcional)
-- [ ] Configurar backups automáticos
-- [ ] Monitorar logs regularmente
-- [ ] Manter sistema atualizado
-
-### Configurar Firewall
-
-```bash
-# Instalar UFW
-apt-get install -y ufw
-
-# Abrir portas
-ufw allow 22/tcp    # SSH
-ufw allow 80/tcp    # HTTP
-ufw allow 443/tcp   # HTTPS
-ufw default deny incoming
-ufw default allow outgoing
-
-# Ativar
-ufw enable
-```
-
----
-
-## ✨ Próximas Fases (Opcional)
-
-1. **Auto-deploy com GitHub Actions**
-   - Push → Build → Deploy automático
-
-2. **Monitoring com Prometheus + Grafana**
-   - Métricas de performance
-   - Alertas
-
-3. **Backups Automáticos**
-   - Para S3/Cloud
-   - Rotação de backups
-
-4. **CDN com Cloudflare**
-   - Cache e proteção DDoS
-   - Melhor performance
-
----
-
-## 📞 Suporte Hostinger
-
-Se tiver problemas:
-- Painel: https://hpanel.hostinger.com
-- Suporte: help.hostinger.com
-- Chat: disponível no painel
-
----
-
-**Sucesso no deployment!** 🚀
+**Status:** ✅ DEPLOYMENT SEGURO  
+**URL:** https://adriner.fr/fiscalia  
+**Isolamento:** 🔒 Completo (site original protegido)
 
 *Última atualização: 2026-05-25*
