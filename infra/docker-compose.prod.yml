@@ -44,7 +44,7 @@ services:
       - MINIO_ROOT_PASSWORD=FiscalAI#MinIO2026!@Secure
       - MINIO_BUCKET=fiscalai-documents
       - CORS_ORIGINS=https://adriner.fr,http://localhost:5173
-      - SECRET_KEY=k8x!@mP9$vQ2rL5&nJ4wH7cF3bG6yT1Z
+      - SECRET_KEY=k8xAmP9xvQ2rL5xnJ4wH7cF3bG6yT1Z
       - ALLOWED_HOSTS=adriner.fr,backend,localhost
       - LOG_LEVEL=INFO
     depends_on:
