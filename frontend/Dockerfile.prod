@@ -12,9 +12,6 @@ RUN npm ci
 # Copiar código
 COPY . .
 
-# Verificar estrutura
-RUN ls -la src/lib/
-
 # Build
 RUN npm run build
 
