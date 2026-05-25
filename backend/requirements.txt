@@ -22,6 +22,7 @@ minio==7.2.2
 pydantic==2.6.0
 pydantic-settings==2.1.0
 pydantic-extra-types==2.4.0
+email-validator==2.1.0
 
 # XML/Data Parsing
 lxml==4.9.4
