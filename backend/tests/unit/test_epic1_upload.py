@@ -4,7 +4,7 @@ Tests for EPIC 1 — Upload and File Management
 import pytest
 from io import BytesIO
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker, Session
 
 from app.core.database import Base, get_db
@@ -21,7 +21,11 @@ from app.core.config import settings
 @pytest.fixture
 def test_db():
     """Create an in-memory SQLite database for testing"""
-    engine = create_engine("sqlite:///:memory:")
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
@@ -44,6 +48,12 @@ def test_user(test_db: Session):
 @pytest.fixture
 def authenticated_client(test_db: Session, test_user: User):
     """Create an authenticated test client"""
+    # Override get_db BEFORE creating client
+    def override_get_db():
+        yield test_db
+
+    app.dependency_overrides[get_db] = override_get_db
+
     # Login to get tokens
     login_request = LoginRequest(
         email="test@example.com",
@@ -51,19 +61,12 @@ def authenticated_client(test_db: Session, test_user: User):
     )
     token_response = AuthService.login(test_db, login_request)
 
-    # Create client with auth headers
     client = TestClient(app)
-
-    # Override get_db dependency
-    def override_get_db():
-        yield test_db
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    # Add token to headers
     client.headers["Authorization"] = f"Bearer {token_response.access_token}"
 
-    return client
+    yield client
+
+    app.dependency_overrides.clear()
 
 
 class TestStorageService:
@@ -159,7 +162,7 @@ class TestDocumentModel:
             storage_key="org_001/sped_efd_icms/abc123def456.txt",
             storage_bucket="fiscal-docs",
         )
-        db.flush()
+        test_db.flush()
         version1 = doc1.document_version
 
         # Second upload with same hash (reprocessing)
@@ -187,13 +190,28 @@ class TestUploadEndpoint:
 
     def test_upload_single_sped_file(self, authenticated_client, test_db: Session):
         """Test uploading a single SPED file"""
+        from unittest.mock import patch, MagicMock
+
         content = b"|0|ID|..."  # Minimal SPED content
         file = ("test_sped.txt", BytesIO(content), "text/plain")
 
-        response = authenticated_client.post(
-            "/api/v1/uploads",
-            files={"files": file}
-        )
+        mock_storage_instance = MagicMock()
+        mock_storage_instance.upload.return_value = "org_001/unknown/abc123.txt"
+        mock_storage_instance.bucket = "fiscal-docs"
+
+        from app.services.storage_service import StorageService as RealStorageService
+
+        with patch("app.api.uploads.StorageService") as MockStorageClass, \
+             patch("app.api.uploads.parse_document") as mock_parse:
+            MockStorageClass.return_value = mock_storage_instance
+            MockStorageClass.calculate_file_hash = RealStorageService.calculate_file_hash
+            MockStorageClass.build_storage_key = RealStorageService.build_storage_key
+            mock_parse.delay.return_value = MagicMock(id="task-123")
+
+            response = authenticated_client.post(
+                "/api/v1/uploads",
+                files={"files": file}
+            )
 
         assert response.status_code == 201
         data = response.json()
@@ -211,13 +229,27 @@ class TestUploadEndpoint:
 
     def test_upload_xml_nfe(self, authenticated_client, test_db: Session):
         """Test uploading an NF-e XML file"""
+        from unittest.mock import patch, MagicMock
+        from app.services.storage_service import StorageService as RealStorageService
+
         content = b'<?xml version="1.0"?><NFe>...</NFe>'
         file = ("nfe.xml", BytesIO(content), "application/xml")
 
-        response = authenticated_client.post(
-            "/api/v1/uploads",
-            files={"files": file}
-        )
+        mock_storage_instance = MagicMock()
+        mock_storage_instance.upload.return_value = "org_001/unknown/abc123.xml"
+        mock_storage_instance.bucket = "fiscal-docs"
+
+        with patch("app.api.uploads.StorageService") as MockStorageClass, \
+             patch("app.api.uploads.parse_document") as mock_parse:
+            MockStorageClass.return_value = mock_storage_instance
+            MockStorageClass.calculate_file_hash = RealStorageService.calculate_file_hash
+            MockStorageClass.build_storage_key = RealStorageService.build_storage_key
+            mock_parse.delay.return_value = MagicMock(id="task-456")
+
+            response = authenticated_client.post(
+                "/api/v1/uploads",
+                files={"files": file}
+            )
 
         assert response.status_code == 201
         data = response.json()
@@ -242,33 +274,49 @@ class TestUploadEndpoint:
         assert "Invalid file type" in result["reason"]
 
     def test_upload_no_files(self, authenticated_client):
-        """Test upload with no files"""
+        """Test upload with no files returns 422 (FastAPI validation)"""
         response = authenticated_client.post(
             "/api/v1/uploads",
             files={}
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
     def test_upload_duplicate_file(self, authenticated_client, test_db: Session):
         """Test that duplicate uploads are detected"""
+        from unittest.mock import patch, MagicMock
+
         content = b"|0|ID|test sped content"
-        file = ("test_sped.txt", BytesIO(content), "text/plain")
 
-        # First upload
-        response1 = authenticated_client.post(
-            "/api/v1/uploads",
-            files={"files": file}
-        )
-        assert response1.status_code == 201
-        assert response1.json()["summary"]["accepted"] == 1
+        from app.services.storage_service import StorageService as RealStorageService
 
-        # Second upload with same content (will have same hash)
-        file = ("test_sped.txt", BytesIO(content), "text/plain")
-        response2 = authenticated_client.post(
-            "/api/v1/uploads",
-            files={"files": file}
-        )
+        mock_storage_instance = MagicMock()
+        mock_storage_instance.upload.return_value = "org_001/unknown/abc.txt"
+        mock_storage_instance.bucket = "fiscal-docs"
+
+        with patch("app.api.uploads.StorageService") as MockStorageClass, \
+             patch("app.api.uploads.parse_document") as mock_parse:
+            MockStorageClass.return_value = mock_storage_instance
+            MockStorageClass.calculate_file_hash = RealStorageService.calculate_file_hash
+            MockStorageClass.build_storage_key = RealStorageService.build_storage_key
+            mock_parse.delay.return_value = MagicMock(id="task-dup")
+
+            # First upload
+            file = ("test_sped.txt", BytesIO(content), "text/plain")
+            response1 = authenticated_client.post(
+                "/api/v1/uploads",
+                files={"files": file}
+            )
+            assert response1.status_code == 201
+            assert response1.json()["summary"]["accepted"] == 1
+
+            # Second upload with same content (will have same hash)
+            file = ("test_sped.txt", BytesIO(content), "text/plain")
+            response2 = authenticated_client.post(
+                "/api/v1/uploads",
+                files={"files": file}
+            )
+
         assert response2.status_code == 201
 
         data = response2.json()
@@ -278,16 +326,31 @@ class TestUploadEndpoint:
 
     def test_upload_batch_multiple_files(self, authenticated_client):
         """Test batch upload of multiple files"""
+        from unittest.mock import patch, MagicMock
+
+        from app.services.storage_service import StorageService as RealStorageService
+
+        mock_storage_instance = MagicMock()
+        mock_storage_instance.upload.side_effect = lambda content, key, content_type: key
+        mock_storage_instance.bucket = "fiscal-docs"
+
         files = [
             ("file1.txt", BytesIO(b"|0|ID|file1"), "text/plain"),
             ("file2.txt", BytesIO(b"|0|ID|file2"), "text/plain"),
             ("file3.xml", BytesIO(b"<?xml></xml>"), "application/xml"),
         ]
 
-        response = authenticated_client.post(
-            "/api/v1/uploads",
-            files=[(f"files", f) for f in files]
-        )
+        with patch("app.api.uploads.StorageService") as MockStorageClass, \
+             patch("app.api.uploads.parse_document") as mock_parse:
+            MockStorageClass.return_value = mock_storage_instance
+            MockStorageClass.calculate_file_hash = RealStorageService.calculate_file_hash
+            MockStorageClass.build_storage_key = RealStorageService.build_storage_key
+            mock_parse.delay.return_value = MagicMock(id="task-batch")
+
+            response = authenticated_client.post(
+                "/api/v1/uploads",
+                files=[(f"files", f) for f in files]
+            )
 
         assert response.status_code == 201
         data = response.json()
@@ -313,4 +376,4 @@ class TestUploadEndpoint:
             files={"files": file}
         )
 
-        assert response.status_code == 403  # Forbidden (no credentials)
+        assert response.status_code == 401  # HTTPBearer returns 401 when no credentials

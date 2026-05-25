@@ -121,13 +121,15 @@ def test_delete_not_found(storage_service):
     """Test deletion of non-existent key (should not raise)"""
     from minio.error import S3Error as MinioS3Error
 
-    # Create a mock S3Error with code attribute
-    error = MagicMock(spec=MinioS3Error)
-    error.code = "NoSuchKey"
-    storage_service.client.remove_object.side_effect = error
+    # S3Error requires a real response object; patch isinstance check instead
+    # by raising a real exception subclass that carries .code
+    class FakeS3Error(Exception):
+        def __init__(self, code):
+            self.code = code
 
-    # Should not raise - logs warning and returns
-    storage_service.delete("nonexistent/key")
+    with patch("app.services.storage_service.S3Error", FakeS3Error):
+        storage_service.client.remove_object.side_effect = FakeS3Error("NoSuchKey")
+        storage_service.delete("nonexistent/key")
 
 
 def test_exists_success(storage_service):
@@ -141,11 +143,10 @@ def test_exists_success(storage_service):
 
 def test_exists_not_found(storage_service):
     """Test exists returns False for missing key"""
-    from minio.error import S3Error as MinioS3Error
+    class FakeS3Error(Exception):
+        def __init__(self, code):
+            self.code = code
 
-    # Create a mock S3Error with code attribute
-    error = MagicMock(spec=MinioS3Error)
-    error.code = "NoSuchKey"
-    storage_service.client.stat_object.side_effect = error
-
-    assert storage_service.exists("nonexistent/key") is False
+    with patch("app.services.storage_service.S3Error", FakeS3Error):
+        storage_service.client.stat_object.side_effect = FakeS3Error("NoSuchKey")
+        assert storage_service.exists("nonexistent/key") is False

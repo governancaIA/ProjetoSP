@@ -107,21 +107,14 @@ def test_parse_document_sped_success(mock_session, sample_sped_content):
     with patch('app.tasks.parse_document.SessionLocal', return_value=mock_session), \
          patch('app.tasks.parse_document.set_tenant_schema'), \
          patch('app.tasks.parse_document.StorageService') as mock_storage_cls, \
-         patch('app.tasks.parse_document.DocumentService') as mock_doc_service_cls:
+         patch('app.tasks.parse_document.DocumentService') as mock_doc_service_cls, \
+         patch('app.tasks.parse_document.validate_document') as mock_validate:
 
+        mock_validate.delay = MagicMock()
         mock_storage = MagicMock()
         mock_storage.download.return_value = sample_sped_content.encode('utf-8')
         mock_storage_cls.return_value = mock_storage
 
-        # Execute task
-        task = parse_document
-        result = task.apply_async(
-            args=(1, "org_001"),
-            task_id="test-task-123",
-        )
-
-        # For testing with CELERY_TASK_ALWAYS_EAGER=True
-        # we can just call directly
         from app.tasks.parse_document import parse_document as parse_doc
         result = parse_doc(1, "org_001")
 
@@ -142,8 +135,10 @@ def test_parse_document_nfe_success(mock_session, sample_nfe_content):
     with patch('app.tasks.parse_document.SessionLocal', return_value=mock_session), \
          patch('app.tasks.parse_document.set_tenant_schema'), \
          patch('app.tasks.parse_document.StorageService') as mock_storage_cls, \
-         patch('app.tasks.parse_document.DocumentService'):
+         patch('app.tasks.parse_document.DocumentService'), \
+         patch('app.tasks.parse_document.validate_document') as mock_validate:
 
+        mock_validate.delay = MagicMock()
         mock_storage = MagicMock()
         mock_storage.download.return_value = sample_nfe_content.encode('utf-8')
         mock_storage_cls.return_value = mock_storage

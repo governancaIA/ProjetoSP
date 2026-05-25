@@ -80,10 +80,9 @@ async def upload_files(
                 detail="Maximum 100 files per upload"
             )
 
-        # Check storage quota
-        storage = StorageService()
         current_usage = _get_tenant_storage_usage(db, tenant_id)
         logger.info(f"Tenant {tenant_id} current usage: {current_usage} bytes")
+        storage = None  # Lazy init — only connect to MinIO when needed
 
         # Process each file
         for file in files:
@@ -142,7 +141,10 @@ async def upload_files(
                     })
                     continue
 
-                # Upload to MinIO
+                # Upload to MinIO (lazy init on first real upload)
+                if storage is None:
+                    storage = StorageService()
+
                 storage_key = StorageService.build_storage_key(
                     tenant_id=tenant_id,
                     document_type="unknown",  # Type detected during parsing

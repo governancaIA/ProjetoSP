@@ -92,31 +92,32 @@ def test_save_fiscal_document_from_sped(mock_db):
                 "valor_pis": "0.65",
                 "valor_cofins": "3.00",
                 "valor_ipi": "0.00",
+                "items": [
+                    {
+                        "codigo_item": "001",
+                        "descricao": "PRODUTO TESTE",
+                        "cfop": "5101",
+                        "cst": "00",
+                        "quantidade": "1.0",
+                        "unidade": "UN",
+                        "valor_unitario": "100.00",
+                        "valor_item": "100.00",
+                        "valor_desc": "0.00",
+                        "valor_bc_icms": "100.00",
+                        "aliq_icms": "12.00",
+                        "valor_icms": "12.00",
+                        "valor_bc_pis": "0.00",
+                        "aliq_pis": "0.00",
+                        "valor_pis": "0.00",
+                        "valor_bc_cofins": "0.00",
+                        "aliq_cofins": "0.00",
+                        "valor_cofins": "0.00",
+                        "valor_ipi": "0.00",
+                    }
+                ],
             }
         ],
-        "C170": [
-            {
-                "codigo_item": "001",
-                "descricao": "PRODUTO TESTE",
-                "cfop": "5101",
-                "cst": "00",
-                "quantidade": "1.0",
-                "unidade": "UN",
-                "valor_unitario": "100.00",
-                "valor_item": "100.00",
-                "valor_desc": "0.00",
-                "valor_bc_icms": "100.00",
-                "aliq_icms": "12.00",
-                "valor_icms": "12.00",
-                "valor_bc_pis": "0.00",
-                "aliq_pis": "0.00",
-                "valor_pis": "0.00",
-                "valor_bc_cofins": "0.00",
-                "aliq_cofins": "0.00",
-                "valor_cofins": "0.00",
-                "valor_ipi": "0.00",
-            }
-        ],
+        "C170": [],
     }
 
     docs = DocumentService.save_fiscal_document_from_sped(

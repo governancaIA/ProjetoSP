@@ -28,7 +28,7 @@ class Document(Base):
     # File metadata
     original_filename = Column(String(255), nullable=False)
     document_type = Column(Enum(DocumentType), default=DocumentType.UNKNOWN)
-    file_hash = Column(String(64), unique=True, nullable=False, index=True)  # SHA-256
+    file_hash = Column(String(64), nullable=False, index=True)  # SHA-256
     file_size = Column(Integer, nullable=False)
 
     # Storage
