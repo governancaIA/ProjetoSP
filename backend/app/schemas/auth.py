@@ -41,3 +41,24 @@ class UserOut(BaseModel):
     is_active: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+_REGIMES = {"lucro_real", "lucro_presumido", "simples_nacional"}
+
+
+class OnboardingRequest(BaseModel):
+    """Onboarding wizard payload — fiscal identity for a tenant"""
+    cnpj: str = Field(..., min_length=14, max_length=18, description="CNPJ (digits only or formatted XX.XXX.XXX/XXXX-XX)")
+    razao_social: str = Field(..., min_length=1, max_length=255)
+    uf: str = Field(..., min_length=2, max_length=2, description="UF do estabelecimento principal (e.g. SP)")
+    regime_tributario: str = Field(..., description="lucro_real | lucro_presumido | simples_nacional")
+
+    def model_post_init(self, __context) -> None:
+        if self.regime_tributario not in _REGIMES:
+            raise ValueError(f"regime_tributario must be one of {sorted(_REGIMES)}")
+
+
+class OnboardingStatusResponse(BaseModel):
+    """Response for GET /auth/onboarding/status"""
+    completed: bool
+    regime_tributario: str | None = None

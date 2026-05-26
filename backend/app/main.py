@@ -10,8 +10,12 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+import redis as redis_lib
+from minio import Minio
+
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, SessionLocal
+from app.core.middleware import TenantMiddleware
 from app.api import uploads, documents, validation, auth, jobs, reports
 
 # Global rate limiter — keyed by client IP
@@ -41,6 +45,9 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+# Tenant schema routing — must be added before CORS so it runs inside CORS
+app.add_middleware(TenantMiddleware)
 
 # CORS — never allow * with credentials in production
 app.add_middleware(
@@ -72,9 +79,6 @@ async def root():
 async def health():
     """Real health check — verifies PostgreSQL, Redis, and MinIO connectivity."""
     from sqlalchemy import text
-    from app.core.database import SessionLocal
-    import redis as redis_lib
-    from minio import Minio
 
     checks: dict = {}
     overall = "healthy"
@@ -100,13 +104,13 @@ async def health():
 
     # MinIO
     try:
-        client = Minio(
+        minio_client = Minio(
             settings.MINIO_ENDPOINT,
             access_key=settings.MINIO_ACCESS_KEY,
             secret_key=settings.MINIO_SECRET_KEY,
             secure=settings.MINIO_USE_SSL,
         )
-        client.list_buckets()
+        minio_client.list_buckets()
         checks["minio"] = "ok"
     except Exception as e:
         checks["minio"] = f"error: {e}"

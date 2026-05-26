@@ -4,7 +4,7 @@ Database configuration and tenant routing
 import re
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import QueuePool
 
 from app.core.config import settings
 
@@ -21,7 +21,10 @@ def _validate_tenant_id(tenant_id: str) -> str:
 # Create database engine
 engine = create_engine(
     settings.DATABASE_URL,
-    poolclass=NullPool,
+    poolclass=QueuePool,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
     echo=settings.DEBUG,
 )
 

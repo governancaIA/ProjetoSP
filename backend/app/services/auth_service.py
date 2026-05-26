@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.models.user import User, RefreshToken
+from app.models.tenant_config import TenantConfig
+from app.core.validators import validate_cnpj
 from app.core.security import (
     get_password_hash,
     verify_password,
@@ -14,7 +16,7 @@ from app.core.security import (
     hash_token,
 )
 from app.core.config import settings
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, OnboardingRequest
 
 
 class AuthService:
@@ -207,6 +209,39 @@ class AuthService:
             refresh_token=raw_new_refresh_token,
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
+
+    @staticmethod
+    def complete_onboarding(db: Session, tenant_id: str, request: OnboardingRequest) -> TenantConfig:
+        """
+        Validate CNPJ and persist TenantConfig for the tenant.
+        Idempotent: upserts if onboarding was already completed.
+
+        Raises:
+            ValueError: If CNPJ check digits are invalid
+        """
+        cnpj_digits = "".join(c for c in request.cnpj if c.isdigit())
+        if not validate_cnpj(cnpj_digits):
+            raise ValueError(f"CNPJ inválido: {request.cnpj}")
+
+        cfg = db.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
+        if cfg is None:
+            cfg = TenantConfig(tenant_id=tenant_id)
+            db.add(cfg)
+
+        cfg.cnpj_principal = cnpj_digits
+        cfg.razao_social = request.razao_social
+        cfg.uf = request.uf.upper()
+        cfg.regime_tributario = request.regime_tributario
+        cfg.onboarding_completed = "1"
+
+        db.commit()
+        db.refresh(cfg)
+        return cfg
+
+    @staticmethod
+    def get_onboarding_status(db: Session, tenant_id: str) -> TenantConfig | None:
+        """Return TenantConfig for the tenant, or None if not yet configured."""
+        return db.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
 
     @staticmethod
     def logout(db: Session, raw_refresh_token: str) -> bool:

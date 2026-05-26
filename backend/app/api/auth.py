@@ -16,6 +16,8 @@ from app.schemas.auth import (
     TokenResponse,
     RefreshRequest,
     UserOut,
+    OnboardingRequest,
+    OnboardingStatusResponse,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -133,3 +135,39 @@ async def get_me(current_user: User = Depends(get_current_user)) -> User:
         Current user (without password)
     """
     return current_user
+
+
+@router.post("/onboarding", response_model=OnboardingStatusResponse, status_code=status.HTTP_200_OK)
+async def complete_onboarding(
+    request: OnboardingRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OnboardingStatusResponse:
+    """
+    Complete tenant onboarding: validate CNPJ and save fiscal configuration.
+    Idempotent — can be called again to update configuration.
+    """
+    try:
+        cfg = AuthService.complete_onboarding(db, current_user.tenant_id, request)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    return OnboardingStatusResponse(
+        completed=cfg.onboarding_completed == "1",
+        regime_tributario=cfg.regime_tributario,
+    )
+
+
+@router.get("/onboarding/status", response_model=OnboardingStatusResponse)
+async def get_onboarding_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OnboardingStatusResponse:
+    """Return onboarding completion status for the current tenant."""
+    cfg = AuthService.get_onboarding_status(db, current_user.tenant_id)
+    if cfg is None:
+        return OnboardingStatusResponse(completed=False, regime_tributario=None)
+    return OnboardingStatusResponse(
+        completed=cfg.onboarding_completed == "1",
+        regime_tributario=cfg.regime_tributario,
+    )
