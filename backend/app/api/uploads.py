@@ -5,7 +5,7 @@ US-1.2: Batch upload and lote processing
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, AsyncIterator
 import logging
 
 from app.api.deps import get_db, get_current_user
@@ -28,6 +28,17 @@ ALLOWED_MIME_TYPES = {
 
 # Maximum file size: 2 GB (per docs/epics.md requirement)
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
+
+_UPLOAD_CHUNK = 8 * 1024 * 1024  # 8 MB read chunks
+
+
+async def _iter_upload(file: UploadFile) -> AsyncIterator[bytes]:
+    """Yield UploadFile content in 8 MB chunks without loading it fully in RAM."""
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK)
+        if not chunk:
+            break
+        yield chunk
 
 # Storage quota per tenant per month: 10GB default
 STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024  # 10GB
@@ -119,9 +130,8 @@ async def upload_files(
 
                 try:
                     # Stream upload: hash and size computed incrementally, no full-file read
-                    # UploadFile.stream() returns an async iterator of bytes chunks
                     _, file_hash, file_size = await storage.upload_stream(
-                        file_stream=file.stream(),
+                        file_stream=_iter_upload(file),
                         key=temp_key,
                         content_type=file.content_type,
                         max_size=MAX_FILE_SIZE,
