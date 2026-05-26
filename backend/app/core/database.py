@@ -54,12 +54,13 @@ def set_tenant_schema(session: Session, tenant_id: str) -> None:
 
 def create_tenant_schema(tenant_id: str) -> None:
     """
-    Create a new schema for a tenant.
+    Create a new schema for a tenant and provision all tables inside it.
     tenant_id is validated against a strict regex before interpolation.
     """
     _validate_tenant_id(tenant_id)
     schema_name = f"tenant_{tenant_id}"
-    with engine.connect() as conn:
+    # Use a single connection so SET search_path affects the create_all DDL
+    with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
-        conn.commit()
-    Base.metadata.create_all(bind=engine)
+        conn.execute(text(f'SET search_path TO "{schema_name}", public'))
+        Base.metadata.create_all(bind=conn)

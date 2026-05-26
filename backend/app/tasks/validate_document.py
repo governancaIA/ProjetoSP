@@ -8,6 +8,7 @@ from app.core.celery_app import celery_app
 from app.core.database import SessionLocal, set_tenant_schema
 from app.models.document import Document
 from app.models.fiscal_document import FiscalDocument
+from app.models.ct_document import CTDocument
 from app.models.rule_log import SeverityLevel
 from app.validators.rules.dag import RuleDAG
 from app.validators.rules.registry import get_active_rules
@@ -83,12 +84,25 @@ def validate_document(
         dag = RuleDAG(rules)
         all_results = []
 
+        # Load parent Document once (for document_type injection into config)
+        parent_doc = db.query(Document).filter_by(id=document_id).first()
+        source_type = parent_doc.document_type.value if parent_doc else None
+
+        # Load CT-e records linked to this document (for CteCanceladoRule)
+        ct_docs = (
+            db.query(CTDocument)
+            .filter_by(document_id=document_id, superseded=False)
+            .all()
+        )
+
         # Execute rules against each FiscalDocument
         for fdoc in fiscal_docs:
             logger.info(f"Running rules on fiscal_document {fdoc.id} ({fdoc.chave_acesso})")
 
-            # Get tenant-specific config
             config = RuleService.get_config(db, tenant_id, "*")
+            # Inject per-document context so rules can adapt their behavior
+            config["source_document_type"] = source_type
+            config["ct_documents"] = ct_docs
 
             # Execute all rules for this document
             results = dag.execute(fdoc, fdoc.items, config)

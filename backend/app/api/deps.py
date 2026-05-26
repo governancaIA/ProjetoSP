@@ -6,7 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db as _get_db_raw, _validate_tenant_id
+from app.core.database import SessionLocal, _validate_tenant_id
 from app.core.security import verify_access_token
 from app.models.user import User
 
@@ -19,7 +19,7 @@ def get_db(request: Request):
     Reads tenant_id from request.state (populated by TenantMiddleware).
     Falls back to public schema for unauthenticated/public endpoints.
     """
-    db = next(_get_db_raw())
+    db = SessionLocal()
     try:
         tenant_id = getattr(request.state, "tenant_id", None)
         if tenant_id:

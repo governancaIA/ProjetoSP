@@ -2,7 +2,7 @@
 Document list endpoint
 """
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_
 
 from app.api.deps import get_db, get_current_user
@@ -28,22 +28,27 @@ async def list_documents(
     """
     tenant_id = current_user.tenant_id
 
-    # Query fiscal documents for this tenant (non-superseded only)
-    query = db.query(FiscalDocument).filter(
-        and_(
-            FiscalDocument.tenant_id == tenant_id,
-            FiscalDocument.superseded == False,
-        )
-    ).order_by(FiscalDocument.created_at.desc())
-
-    total = query.count()
-    documents = query.offset(offset).limit(limit).all()
+    # Query fiscal documents for this tenant (non-superseded only), eager-loading
+    # rule_logs to avoid N+1 queries when computing scores
+    base_filter = and_(
+        FiscalDocument.tenant_id == tenant_id,
+        FiscalDocument.superseded == False,
+    )
+    total = db.query(FiscalDocument).filter(base_filter).count()
+    documents = (
+        db.query(FiscalDocument)
+        .filter(base_filter)
+        .options(joinedload(FiscalDocument.rule_logs))
+        .order_by(FiscalDocument.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     # Build response items
     items = []
     for doc in documents:
-        # Get score for this document
-        score = ScoringService.get_document_score(db, doc.id)
+        score = ScoringService.compute_score_from_loaded(doc)
 
         item = DocumentListItem(
             id=doc.id,

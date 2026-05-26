@@ -96,7 +96,7 @@ class FiscalItem(Base):
 
     # Operation
     cfop = Column(String(4), nullable=False)
-    cst = Column(String(2), nullable=False)
+    cst = Column(String(3), nullable=False)  # Simples Nacional CSTs have 3 digits (101, 102…)
 
     # Quantity
     quantidade = Column(Numeric(15, 4), nullable=False)

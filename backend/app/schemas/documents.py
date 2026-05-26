@@ -3,7 +3,7 @@ Schemas for document and validation endpoints
 """
 from decimal import Decimal
 from datetime import date, datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # Field ainda usado em DocumentScoreResponse
 from typing import Optional, List
 
 
@@ -11,7 +11,7 @@ from typing import Optional, List
 
 class DocumentListItem(BaseModel):
     """Document item for list view"""
-    document_id: int = Field(..., alias="id")
+    id: int
     chave_acesso: Optional[str] = None
     numero_nf: str
     emitente_nome: Optional[str] = None
@@ -34,7 +34,7 @@ class DocumentsResponse(BaseModel):
 
 class DocumentDetailResponse(BaseModel):
     """Detailed document information"""
-    document_id: int = Field(..., alias="id")
+    id: int
     chave_acesso: Optional[str] = None
     numero_nf: str
     serie: str

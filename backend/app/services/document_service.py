@@ -10,6 +10,7 @@ import logging
 from app.models.document import Document, DocumentType
 from app.models.fiscal_document import FiscalDocument, FiscalItem
 from app.models.ct_document import CTDocument
+from app.models.efd_contribuicoes import EFDContribuicoes, EFDContribuicoesCst
 from app.core.database import set_tenant_schema
 from app.parsers.sped_efd_icms import SPEDRecord
 
@@ -58,17 +59,17 @@ class DocumentService:
             DocumentServiceError: If creation fails
         """
         try:
-            # Check if document with same hash already exists (reprocessamento)
+            # SELECT FOR UPDATE prevents two concurrent workers from both seeing
+            # existing=None and creating duplicate records for the same hash.
             existing = db.query(Document).filter_by(
                 tenant_id=tenant_id,
                 file_hash=file_hash,
-            ).first()
+            ).with_for_update().first()
 
             if existing:
-                # Mark existing as superseded
+                # Mark existing as superseded; new doc receives next version number
+                document_version = existing.document_version + 1
                 existing.superseded = True
-                existing.document_version += 1
-                document_version = existing.document_version
             else:
                 document_version = 1
 
@@ -328,6 +329,68 @@ class DocumentService:
             raise DocumentServiceError(f"Failed to save CT-e document: {str(e)}")
 
     @staticmethod
+    def save_efd_contribuicoes(
+        db: Session,
+        tenant_id: str,
+        document_id: int,
+        parsed: Dict[str, Any],
+    ) -> EFDContribuicoes:
+        """Persist EFD Contribuições parser output (M200/M500 totals + M100/M400 CST detail)."""
+        try:
+            header = parsed.get("0000", {})
+            m200 = parsed.get("M200") or {}
+            m500 = parsed.get("M500") or {}
+
+            record = EFDContribuicoes(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                dt_ini=DocumentService._parse_efd_date(header.get("dt_ini")),
+                dt_fin=DocumentService._parse_efd_date(header.get("dt_fin")),
+                cnpj=header.get("cnpj"),
+                nome=header.get("nome"),
+                uf=header.get("uf"),
+                ind_reg_cum=header.get("ind_reg_cum"),
+                cod_tipo_contrib=header.get("cod_tipo_contrib"),
+                pis_vl_contrib=Decimal(str(m200.get("vl_tot_cont_nc_per", 0))),
+                pis_vl_cred_desc=Decimal(str(m200.get("vl_tot_cred_desc", 0))),
+                pis_vl_saldo_devedor=Decimal(str(m200.get("vl_cont_dev_per", 0))),
+                cofins_vl_contrib=Decimal(str(m500.get("vl_tot_cont_nc_per", 0))),
+                cofins_vl_cred_desc=Decimal(str(m500.get("vl_tot_cred_desc", 0))),
+                cofins_vl_saldo_devedor=Decimal(str(m500.get("vl_cont_dev_per", 0))),
+            )
+            db.add(record)
+            db.flush()
+
+            for m100 in parsed.get("M100", []):
+                db.add(EFDContribuicoesCst(
+                    tenant_id=tenant_id,
+                    efd_contribuicoes_id=record.id,
+                    tipo="PIS",
+                    cst=m100.get("cst_pis", ""),
+                    vl_bc=Decimal(str(m100.get("vl_bc_pis", 0))),
+                    aliq_perc=Decimal(str(m100.get("aliq_pis_perc", 0))),
+                    vl_cred=Decimal(str(m100.get("vl_cred", 0))),
+                ))
+
+            for m400 in parsed.get("M400", []):
+                db.add(EFDContribuicoesCst(
+                    tenant_id=tenant_id,
+                    efd_contribuicoes_id=record.id,
+                    tipo="COFINS",
+                    cst=m400.get("cst_cofins", ""),
+                    vl_bc=Decimal(str(m400.get("vl_bc_cofins", 0))),
+                    aliq_perc=Decimal(str(m400.get("aliq_cofins_perc", 0))),
+                    vl_cred=Decimal(str(m400.get("vl_cred", 0))),
+                ))
+
+            logger.info(f"Saved EFD Contribuições for tenant {tenant_id}, doc {document_id}")
+            return record
+
+        except Exception as e:
+            logger.error(f"Failed to save EFD Contribuições: {str(e)}")
+            raise DocumentServiceError(f"Failed to save EFD Contribuições: {str(e)}")
+
+    @staticmethod
     def update_document_status(
         db: Session,
         document_id: int,
@@ -384,3 +447,16 @@ class DocumentService:
             return parser.isoparse(datetime_str)
         except Exception:
             return None
+
+    @staticmethod
+    def _parse_efd_date(date_str: str):
+        """Parse EFD date (DDMMYYYY or YYYY-MM-DD) to date object"""
+        if not date_str:
+            return None
+        from datetime import datetime
+        for fmt in ("%d%m%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(date_str.strip(), fmt).date()
+            except ValueError:
+                continue
+        return None

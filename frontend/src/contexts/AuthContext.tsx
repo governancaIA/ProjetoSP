@@ -120,15 +120,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       // POST /auth/logout (best-effort - pode falhar se token expirou)
-      if (token) {
+      if (token && refreshToken) {
         await fetch('/api/v1/auth/logout', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`,
           },
+          body: JSON.stringify({ refresh_token: refreshToken }),
         }).catch(() => {
-          // Ignorar erros - apenas melhor esforço
+          // Melhor esforço — token já pode ter expirado
         })
       }
     } finally {

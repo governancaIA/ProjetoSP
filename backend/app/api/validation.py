@@ -3,7 +3,7 @@ Validation and scoring endpoints (US-2.1, US-4.1, US-5.2)
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, extract
 from typing import Optional, List
 
 from app.api.deps import get_db, get_current_user
@@ -175,11 +175,11 @@ async def list_alerts(
 
     if fiscal_year and fiscal_month:
         query = query.filter(
-            FiscalDocument.fiscal_year == fiscal_year,
-            FiscalDocument.fiscal_month == fiscal_month,
+            extract("year", FiscalDocument.data_emissao) == fiscal_year,
+            extract("month", FiscalDocument.data_emissao) == fiscal_month,
         )
     elif fiscal_year:
-        query = query.filter(FiscalDocument.fiscal_year == fiscal_year)
+        query = query.filter(extract("year", FiscalDocument.data_emissao) == fiscal_year)
 
     total_unfiltered = query.count()
     rows = (

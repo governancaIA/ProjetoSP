@@ -180,6 +180,49 @@ class ScoringService:
         return exposure.quantize(Decimal("0.01"))
 
     @staticmethod
+    def compute_score_from_loaded(fiscal_doc: "FiscalDocument") -> Dict[str, Any]:
+        """
+        Compute document score from an already-loaded FiscalDocument with preloaded rule_logs.
+        Avoids extra DB queries — caller must eager-load rule_logs before calling this.
+        """
+        alerts_by_severity = {
+            AlertSeverity.CRITICAL: 0,
+            AlertSeverity.HIGH: 0,
+            AlertSeverity.MEDIUM: 0,
+            AlertSeverity.LOW: 0,
+            AlertSeverity.INFORMATIVE: 0,
+        }
+        total_exposure = Decimal("0.00")
+        rules_failed = 0
+        rules_passed = 0
+
+        for log in fiscal_doc.rule_logs:
+            severity, exposure = ScoringService.calculate_alert_severity(log, fiscal_doc)
+            alerts_by_severity[severity] += 1
+            total_exposure += exposure
+            if log.passed:
+                rules_passed += 1
+            else:
+                rules_failed += 1
+
+        score = 100
+        score -= alerts_by_severity[AlertSeverity.CRITICAL] * 40
+        score -= alerts_by_severity[AlertSeverity.HIGH] * 15
+        score -= alerts_by_severity[AlertSeverity.MEDIUM] * 5
+        score -= alerts_by_severity[AlertSeverity.LOW] * 1
+        score = max(0, min(100, score))
+
+        return {
+            "fiscal_document_id": fiscal_doc.id,
+            "alerts_by_severity": {k.value: v for k, v in alerts_by_severity.items()},
+            "total_exposure": float(total_exposure),
+            "document_score": int(score),
+            "rules_failed": rules_failed,
+            "rules_passed": rules_passed,
+            "total_rules": len(fiscal_doc.rule_logs),
+        }
+
+    @staticmethod
     def get_document_score(
         db: Session,
         fiscal_document_id: int,

@@ -12,6 +12,7 @@ from app.parsers.detector import Detector
 from app.parsers.sped_efd_icms import SPEDParser, ParseError as SPEDParseError
 from app.parsers.nfe_xml import NFEParser, ParseError as NFEParseError
 from app.parsers.cte_xml import CTEParser, ParseError as CTEParseError
+from app.parsers.efd_contribuicoes import EFDContribuicoesParser, EFDContribuicoesParseError
 from app.services.storage_service import StorageService, StorageServiceError
 from app.services.document_service import DocumentService, DocumentServiceError
 from app.tasks.validate_document import validate_document
@@ -104,7 +105,7 @@ def parse_document(self, document_id: int, tenant_id: str) -> dict:
             "document_type": str(doc.document_type),
         }
 
-    except (SPEDParseError, NFEParseError, CTEParseError) as e:
+    except (SPEDParseError, NFEParseError, CTEParseError, EFDContribuicoesParseError) as e:
         # Parsing errors are fatal - don't retry
         logger.error(f"Parse error in document {document_id}: {str(e)}")
         if db:
@@ -204,6 +205,10 @@ def _parse_by_type(content: bytes, document_type: DocumentType, tenant_id: str) 
         parser = CTEParser(tenant_id)
         return parser.parse(content_str)
 
+    elif document_type == DocumentType.EFD_CONTRIBUICOES:
+        parser = EFDContribuicoesParser(tenant_id)
+        return parser.parse_bytes(content)
+
     else:
         raise ValueError(f"Unsupported document type: {document_type}")
 
@@ -236,6 +241,9 @@ def _save_parsed_document(
 
     elif document_type == DocumentType.CTE:
         DocumentService.save_ct_document_from_cte(db, tenant_id, document_id, parsed_result)
+
+    elif document_type == DocumentType.EFD_CONTRIBUICOES:
+        DocumentService.save_efd_contribuicoes(db, tenant_id, document_id, parsed_result)
 
     else:
         raise DocumentServiceError(f"Unsupported document type for saving: {document_type}")

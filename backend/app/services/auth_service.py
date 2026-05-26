@@ -244,22 +244,19 @@ class AuthService:
         return db.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
 
     @staticmethod
-    def logout(db: Session, raw_refresh_token: str) -> bool:
+    def logout(db: Session, raw_refresh_token: str, user_id: int) -> bool:
         """
-        Logout a user by revoking their refresh token
-
-        Args:
-            db: Database session
-            raw_refresh_token: Refresh token to revoke
-
-        Returns:
-            True if logout succeeded, False otherwise
+        Logout a user by revoking their refresh token.
+        Verifies the token belongs to user_id to prevent cross-user revocation.
         """
         token_hash = hash_token(raw_refresh_token)
 
         refresh_token_obj = (
             db.query(RefreshToken)
-            .filter(RefreshToken.token_hash == token_hash)
+            .filter(
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.user_id == user_id,
+            )
             .first()
         )
 

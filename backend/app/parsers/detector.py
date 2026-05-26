@@ -45,36 +45,31 @@ class SPEDDetector:
         if not lines:
             return DocumentType.UNKNOWN, "unknown"
 
-        # Look for header records (first few lines)
-        for i, line in enumerate(lines[:10]):
+        # EFD Contribuições: scan first 100 lines for M100 block or EFD1E marker
+        for line in lines[:100]:
             fields = line.split('|')
-
-            # SPED EFD ICMS: Block 0, record ID (0|ID|...)
-            if len(fields) >= 2 and fields[0] == '0' and fields[1] == 'ID':
-                # This is SPED EFD ICMS - look for version in header
-                version = SPEDDetector._extract_version_from_header(lines)
-                return DocumentType.SPED_EFD_ICMS, version
-
-            # EFD Contribuições: Look for EFD1E or M100 marker
-            if 'EFD1E' in line or (len(fields) >= 2 and fields[1] == 'M100'):
+            if 'EFD1E' in line or (len(fields) >= 3 and fields[1] == 'M100'):
                 version = SPEDDetector._extract_version_from_header(lines)
                 return DocumentType.EFD_CONTRIBUICOES, version
+
+        # SPED EFD ICMS: header record 0000 is always the first pipe-delimited line.
+        # Splitting "|0000|..." on "|" gives ['', '0000', ...] — fields[0] is always ''.
+        for line in lines[:5]:
+            fields = line.split('|')
+            if len(fields) >= 3 and fields[1] == '0000':
+                version = SPEDDetector._extract_version_from_header(lines)
+                return DocumentType.SPED_EFD_ICMS, version
 
         return DocumentType.UNKNOWN, "unknown"
 
     @staticmethod
     def _extract_version_from_header(lines: list) -> str:
         """Extract SPED version from header records"""
-        for line in lines[:20]:
+        for line in lines[:5]:
             fields = line.split('|')
-            # Record 0|00 contains version info
-            if len(fields) >= 3 and fields[0] == '0' and fields[1] == '00':
-                # Version is typically in one of these fields
-                if len(fields) > 7:
-                    try:
-                        return fields[7]  # vrsped
-                    except:
-                        pass
+            # Record 0000: "|0000|cod_ver_edo|..." — version (cod_ver_edo) is fields[2]
+            if len(fields) >= 3 and fields[1] == '0000':
+                return fields[2].strip() if fields[2].strip() else "unknown"
         return "unknown"
 
 class XMLDetector:

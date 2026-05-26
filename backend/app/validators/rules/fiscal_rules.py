@@ -22,6 +22,15 @@ class NfeValorDivergenteRule(BaseRule):
     depends_on = []
 
     def execute(self, fiscal_document, items, config) -> RuleResult:
+        # SPED C100 vl_doc includes freight, ST, insurance — it's structurally larger
+        # than the sum of C170 item values. Comparing them always shows divergence.
+        # This rule is only meaningful for XML NF-e (vNF vs sum of itens).
+        if config.get("source_document_type") == "sped_efd_icms":
+            return self._pass(
+                "Documento de origem SPED — comparação C100 vs C170 não aplicável (vl_doc inclui frete/ST/seguro)",
+                input_snapshot={"source": "sped_efd_icms"},
+            )
+
         tolerance = Decimal(str(config.get("tolerance_brl", 0.01)))
 
         if not items:
@@ -119,6 +128,14 @@ class SaidaSemLancamentoRule(BaseRule):
     _ENTRADA_PREFIXES = {"1", "2", "3"} # 1xxx=entrada intraestadual, 2xxx=interestadual, 3xxx=importação
 
     def execute(self, fiscal_document, items, config) -> RuleResult:
+        # When the CFOP reference table is loaded, CfopInvalidoRule (nível 2) already
+        # validates natureza vs CFOP compatibility. Avoid duplicate alerts.
+        if config.get("valid_cfops"):
+            return self._pass(
+                "Tabela CFOP carregada — CfopInvalidoRule (nível 2) cobre esta verificação",
+                input_snapshot={},
+            )
+
         natureza = (fiscal_document.natureza or "").lower().strip()
 
         if not natureza:
@@ -205,36 +222,36 @@ class CteCanceladoRule(BaseRule):
     depends_on = []
 
     def execute(self, fiscal_document, items, config) -> RuleResult:
-        # Check if this is a CT-e (chave_acesso starting with specific region + 9 for CT-e identifier)
-        # For MVP, rely on documento_type field if available, or natureza
-        natureza = (fiscal_document.natureza or "").lower()
+        # CT-e documents live in CTDocument (separate model from FiscalDocument).
+        # The validate_document task injects them via config["ct_documents"].
+        ct_documents = config.get("ct_documents") or []
 
-        if natureza not in ["transporte", "ct-e", "cte"]:
+        if not ct_documents:
             return self._pass(
-                "Não é CT-e — regra não aplicável",
-                input_snapshot={"natureza": fiscal_document.natureza},
+                "Nenhum CT-e associado a este documento",
+                input_snapshot={"ct_documents_count": 0},
             )
 
-        if not fiscal_document.status_nfe:
+        cancelados = [
+            ct for ct in ct_documents
+            if ct.status_cte and ct.status_cte.lower() == "cancelado"
+        ]
+
+        if not cancelados:
             return self._pass(
-                "CT-e sem status informado",
-                input_snapshot={"status_nfe": None},
+                f"{len(ct_documents)} CT-e(s) com status conforme (nenhum cancelado no SPED)",
+                input_snapshot={"ct_documents_count": len(ct_documents)},
             )
 
-        if fiscal_document.status_nfe.lower() != "cancelado":
-            return self._pass(
-                f"CT-e com status {fiscal_document.status_nfe} — conforme",
-                input_snapshot={"status_nfe": fiscal_document.status_nfe},
-            )
-
-        chave_masked = mask_chave_acesso(fiscal_document.chave_acesso)
+        chaves = [mask_chave_acesso(ct.chave_acesso) for ct in cancelados]
+        numeros = [ct.numero_cte for ct in cancelados]
         return self._fail(
             SeverityLevel.CRITICAL,
-            f"CT-e {fiscal_document.numero_nf} cancelado (chave {chave_masked}) ainda no SPED — deve ser excluído",
+            f"{len(cancelados)} CT-e(s) cancelado(s) ainda escriturado(s) no SPED: {numeros} — devem ser excluídos",
             input_snapshot={
-                "numero_nf": fiscal_document.numero_nf,
-                "chave_acesso": chave_masked,
-                "status_nfe": fiscal_document.status_nfe,
+                "ct_cancelados_count": len(cancelados),
+                "numeros_cte": numeros,
+                "chaves_acesso": chaves,
             },
         )
 

@@ -115,7 +115,7 @@ async def logout(
     Raises:
         HTTPException: If logout fails
     """
-    success = AuthService.logout(db, request.refresh_token)
+    success = AuthService.logout(db, request.refresh_token, current_user.id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
