@@ -259,12 +259,16 @@ def test_cte_cancelado_transportado_autorizado(mock_fiscal_document, mock_item, 
 
 
 def test_cte_cancelado_transportado_cancelado(mock_fiscal_document, mock_item, test_config):
-    """Test cancelled CT-e is flagged as critical"""
-    mock_fiscal_document.natureza = "transporte"
-    mock_fiscal_document.status_nfe = "cancelado"
+    """Test cancelled CT-e injected via config is flagged as critical"""
+    from unittest.mock import MagicMock
+    ct = MagicMock()
+    ct.status_cte = "cancelado"
+    ct.chave_acesso = "35180166047275000199550010000000011234567890"
+    ct.numero_cte = "000001"
+    config = {**test_config, "ct_documents": [ct]}
 
     rule = CteCanceladoRule()
-    result = rule.execute(mock_fiscal_document, [mock_item], test_config)
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
 
     assert result.passed is False
     assert result.severity == SeverityLevel.CRITICAL
@@ -272,10 +276,7 @@ def test_cte_cancelado_transportado_cancelado(mock_fiscal_document, mock_item, t
 
 
 def test_cte_cancelado_nao_transportado(mock_fiscal_document, mock_item, test_config):
-    """Test rule doesn't apply to non-CT-e documents"""
-    mock_fiscal_document.natureza = "saída"
-    mock_fiscal_document.status_nfe = "cancelado"
-
+    """Test rule passes when no CT-e documents are in config"""
     rule = CteCanceladoRule()
     result = rule.execute(mock_fiscal_document, [mock_item], test_config)
 

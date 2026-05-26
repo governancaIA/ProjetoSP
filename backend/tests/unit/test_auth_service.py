@@ -260,7 +260,7 @@ class TestAuthServiceLogout:
     def test_logout_success(self, test_db: Session, authenticated_user):
         """Test successful logout"""
         user, refresh_token = authenticated_user
-        success = AuthService.logout(test_db, refresh_token)
+        success = AuthService.logout(test_db, refresh_token, user.id)
         assert success is True
 
         # Verify token is revoked
@@ -270,14 +270,14 @@ class TestAuthServiceLogout:
 
     def test_logout_invalid_token(self, test_db: Session):
         """Test logout fails with invalid token"""
-        success = AuthService.logout(test_db, "invalid_token")
+        success = AuthService.logout(test_db, "invalid_token", 999)
         assert success is False
 
     def test_logout_already_revoked_token(self, test_db: Session, authenticated_user):
         """Test logout of already revoked token"""
         user, refresh_token = authenticated_user
         # First logout
-        AuthService.logout(test_db, refresh_token)
+        AuthService.logout(test_db, refresh_token, user.id)
         # Second logout should still succeed (idempotent)
-        success = AuthService.logout(test_db, refresh_token)
+        success = AuthService.logout(test_db, refresh_token, user.id)
         assert success is True

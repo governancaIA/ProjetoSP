@@ -260,15 +260,26 @@ class TestFiscalRulesLgpdMasking:
 
     def test_cte_cancelado_message_no_cnpj(self):
         from app.validators.rules.fiscal_rules import CteCanceladoRule
+        from unittest.mock import MagicMock
         rule = CteCanceladoRule()
         doc = self._make_doc(natureza="transporte", status_nfe="cancelado")
-        result = rule.execute(doc, [], {})
+        ct = MagicMock()
+        ct.status_cte = "cancelado"
+        ct.chave_acesso = "35180166047275000199550010000000011234567890"
+        ct.numero_cte = "000001"
+        result = rule.execute(doc, [], {"ct_documents": [ct]})
         assert self._CNPJ_IN_CHAVE not in result.message
         assert self._CNPJ_IN_CHAVE not in str(result.input_snapshot)
 
     def test_cte_cancelado_snapshot_uses_masked_chave(self):
         from app.validators.rules.fiscal_rules import CteCanceladoRule
+        from unittest.mock import MagicMock
         rule = CteCanceladoRule()
         doc = self._make_doc(natureza="transporte", status_nfe="cancelado")
-        result = rule.execute(doc, [], {})
-        assert result.input_snapshot["chave_acesso"] == "351801***550010000000011234567890"
+        ct = MagicMock()
+        ct.status_cte = "cancelado"
+        ct.chave_acesso = "35180166047275000199550010000000011234567890"
+        ct.numero_cte = "000001"
+        result = rule.execute(doc, [], {"ct_documents": [ct]})
+        # chaves_acesso is a list of masked access keys
+        assert "351801***550010000000011234567890" in result.input_snapshot["chaves_acesso"]

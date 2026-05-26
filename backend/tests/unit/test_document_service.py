@@ -24,8 +24,8 @@ def mock_db():
 
 def test_create_document_record_new(mock_db):
     """Test creating a new Document record"""
-    # Mock the query result
-    mock_db.query.return_value.filter_by.return_value.first.return_value = None
+    # Mock the query result (chain includes with_for_update for concurrency safety)
+    mock_db.query.return_value.filter_by.return_value.with_for_update.return_value.first.return_value = None
 
     doc = DocumentService.create_document_record(
         db=mock_db,
@@ -51,7 +51,7 @@ def test_create_document_record_reprocessamento(mock_db):
     # Mock existing document
     existing_doc = MagicMock()
     existing_doc.document_version = 1
-    mock_db.query.return_value.filter_by.return_value.first.return_value = existing_doc
+    mock_db.query.return_value.filter_by.return_value.with_for_update.return_value.first.return_value = existing_doc
 
     doc = DocumentService.create_document_record(
         db=mock_db,
@@ -64,11 +64,11 @@ def test_create_document_record_reprocessamento(mock_db):
         storage_bucket="fiscalai-documents",
     )
 
-    # Existing should be marked as superseded
+    # Existing is marked superseded; its version stays at 1 (historical)
     assert existing_doc.superseded is True
-    assert existing_doc.document_version == 2
+    assert existing_doc.document_version == 1
 
-    # New document should have version 2
+    # New document is version 2 (successor to version 1)
     assert doc.document_version == 2
 
 

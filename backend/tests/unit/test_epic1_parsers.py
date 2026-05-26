@@ -12,9 +12,9 @@ class TestDetector:
     """File type detector tests"""
 
     def test_detect_sped_efd_icms(self):
-        """Test SPED EFD ICMS detection"""
-        # SPED with 0|ID record (header record of SPED)
-        content = "0|ID|28|01|\nC100|0|0|001|55|A|00123|35240191002102800191550010000000011234567890|20240115|20240115|15000.00|1|||100.00|N|200.00|300.00|400.00|50.00|600.00|700.00|"
+        """Test SPED EFD ICMS detection using standard pipe-delimited format"""
+        # Real SPED format: lines start with '|' so split('|')[0]=='' and split('|')[1]=='0000'
+        content = "|0000|028|0|01012024|31012024|EMPRESA TEST LTDA|66047275000199|SP|0000|1|2|1|\n|C100|0|0|001|55|A|00123|35240191002102800191550010000000011234567890|20240115|20240115|15000.00|1|||100.00|N|200.00|300.00|400.00|50.00|600.00|700.00|"
         detected = Detector.detect("efd_icms.txt", content)
 
         # Should detect as SPED
