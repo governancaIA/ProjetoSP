@@ -6,6 +6,7 @@ from decimal import Decimal
 from app.models.rule_log import SeverityLevel
 from app.validators.rules.base import BaseRule, RuleResult
 from app.validators.rules.registry import register
+from app.core.security import mask_chave_acesso
 
 
 @register
@@ -84,13 +85,14 @@ class NfeCanceladaNoSpedRule(BaseRule):
                 input_snapshot={"status_nfe": fiscal_document.status_nfe},
             )
 
+        chave_masked = mask_chave_acesso(fiscal_document.chave_acesso)
         return self._fail(
             SeverityLevel.CRITICAL,
-            f"NF-e {fiscal_document.numero_nf}/{fiscal_document.serie} cancelada (chave {fiscal_document.chave_acesso}) ainda registrada no SPED — deve ser excluída",
+            f"NF-e {fiscal_document.numero_nf}/{fiscal_document.serie} cancelada (chave {chave_masked}) ainda registrada no SPED — deve ser excluída",
             input_snapshot={
                 "numero_nf": fiscal_document.numero_nf,
                 "serie": fiscal_document.serie,
-                "chave_acesso": fiscal_document.chave_acesso,
+                "chave_acesso": chave_masked,
                 "status_nfe": fiscal_document.status_nfe,
             },
         )
@@ -99,32 +101,94 @@ class NfeCanceladaNoSpedRule(BaseRule):
 @register
 class SaidaSemLancamentoRule(BaseRule):
     """
-    Outgoing invoice without corresponding SPED entry.
-    Detects: invoice marked as outgoing (saída) but without SPED C100 (would only have XML).
+    Detects CFOP inconsistency between declared natureza and operation type.
 
-    In MVP: assumes all loaded FiscalDocuments were parsed from SPED, so this passes.
-    Future: compare against actual SPED file for missing entries.
+    Validates that:
+    - NF-e de saída (ind_emitente=0) uses CFOPs 5xxx or 6xxx (outbound)
+    - NF-e de entrada (ind_emitente=1) uses CFOPs 1xxx or 2xxx (inbound)
+
+    A CFOP mismatch indicates wrong escrituração: e.g., saída lançada com CFOP de entrada,
+    or the natureza field was set incorrectly on import.
     """
     rule_id = "saida_sem_lancamento"
-    rule_version = "1.0.0"
+    rule_version = "2.0.0"
     depends_on = []
 
-    def execute(self, fiscal_document, items, config) -> RuleResult:
-        # In MVP, all FiscalDocuments come from SPED parsing, so they're already in the ledger
-        natureza = (fiscal_document.natureza or "").lower()
+    # CFOP prefix groupings
+    _SAIDA_PREFIXES = {"5", "6", "7"}   # 5xxx=saída intraestadual, 6xxx=interestadual, 7xxx=exportação
+    _ENTRADA_PREFIXES = {"1", "2", "3"} # 1xxx=entrada intraestadual, 2xxx=interestadual, 3xxx=importação
 
-        if natureza not in ["saída", "saida"]:
+    def execute(self, fiscal_document, items, config) -> RuleResult:
+        natureza = (fiscal_document.natureza or "").lower().strip()
+
+        if not natureza:
             return self._pass(
-                f"Operação {natureza or 'indeterminada'} — não é saída",
-                input_snapshot={"natureza": fiscal_document.natureza},
+                "Natureza da operação não informada — regra não aplicável",
+                input_snapshot={"natureza": None},
+            )
+
+        if not items:
+            return self._pass(
+                "NF-e sem itens — regra não aplicável",
+                input_snapshot={"natureza": natureza},
+            )
+
+        cfops = [item.cfop for item in items if item.cfop]
+        if not cfops:
+            return self._pass(
+                "Itens sem CFOP — regra não aplicável",
+                input_snapshot={"natureza": natureza, "num_itens": len(items)},
+            )
+
+        cfop_prefixes = {cfop[0] for cfop in cfops if cfop}
+
+        is_saida = natureza in {"saida", "saída"}
+        is_entrada = natureza in {"entrada"}
+
+        if is_saida:
+            # Saída deve usar apenas CFOPs 5xxx, 6xxx ou 7xxx
+            wrong_cfops = [c for c in cfops if c and c[0] in self._ENTRADA_PREFIXES]
+            if wrong_cfops:
+                return self._fail(
+                    SeverityLevel.CRITICAL,
+                    f"NF-e de saída escriturada com CFOP de entrada: {sorted(set(wrong_cfops))} — "
+                    f"indica escrituração incorreta ou nota de saída sem lançamento no livro fiscal",
+                    input_snapshot={
+                        "natureza": natureza,
+                        "numero_nf": fiscal_document.numero_nf,
+                        "chave_acesso": mask_chave_acesso(fiscal_document.chave_acesso),
+                        "cfops_invalidos": sorted(set(wrong_cfops)),
+                        "cfops_utilizados": sorted(set(cfops)),
+                    },
+                )
+            return self._pass(
+                f"Saída escriturada corretamente com CFOPs {sorted(cfop_prefixes)}xxx",
+                input_snapshot={"natureza": natureza, "cfop_prefixes": sorted(cfop_prefixes)},
+            )
+
+        if is_entrada:
+            # Entrada deve usar apenas CFOPs 1xxx, 2xxx ou 3xxx
+            wrong_cfops = [c for c in cfops if c and c[0] in self._SAIDA_PREFIXES]
+            if wrong_cfops:
+                return self._fail(
+                    SeverityLevel.WARNING,
+                    f"NF-e de entrada escriturada com CFOP de saída: {sorted(set(wrong_cfops))} — "
+                    f"verificar se a operação foi classificada corretamente",
+                    input_snapshot={
+                        "natureza": natureza,
+                        "numero_nf": fiscal_document.numero_nf,
+                        "cfops_invalidos": sorted(set(wrong_cfops)),
+                        "cfops_utilizados": sorted(set(cfops)),
+                    },
+                )
+            return self._pass(
+                f"Entrada escriturada corretamente com CFOPs {sorted(cfop_prefixes)}xxx",
+                input_snapshot={"natureza": natureza, "cfop_prefixes": sorted(cfop_prefixes)},
             )
 
         return self._pass(
-            f"Saída registrada no SPED — conforme",
-            input_snapshot={
-                "numero_nf": fiscal_document.numero_nf,
-                "natureza": fiscal_document.natureza,
-            },
+            f"Natureza '{natureza}' — regra não aplicável a esta operação",
+            input_snapshot={"natureza": natureza},
         )
 
 
@@ -163,12 +227,13 @@ class CteCanceladoRule(BaseRule):
                 input_snapshot={"status_nfe": fiscal_document.status_nfe},
             )
 
+        chave_masked = mask_chave_acesso(fiscal_document.chave_acesso)
         return self._fail(
             SeverityLevel.CRITICAL,
-            f"CT-e {fiscal_document.numero_nf} cancelado (chave {fiscal_document.chave_acesso}) ainda no SPED — deve ser excluído",
+            f"CT-e {fiscal_document.numero_nf} cancelado (chave {chave_masked}) ainda no SPED — deve ser excluído",
             input_snapshot={
                 "numero_nf": fiscal_document.numero_nf,
-                "chave_acesso": fiscal_document.chave_acesso,
+                "chave_acesso": chave_masked,
                 "status_nfe": fiscal_document.status_nfe,
             },
         )
@@ -235,45 +300,97 @@ class IcmsDivergenteRule(BaseRule):
 @register
 class CstIncompatiavelRule(BaseRule):
     """
-    CST (tax regime code) incompatible with regime.
-    Detects: PIS/COFINS CST codes that are invalid for the company's regime.
+    CST ICMS inválido ou incompatível com o regime tributário do tenant.
 
-    Rules:
-    - Presumed Income (Lucro Presumido) cannot use CST 01/02/03 (only 04-07)
-    - Simples Nacional does not file PIS/COFINS separately (should be absent)
-    - Real Income (Lucro Real) must use CST 01-07 or specific deferrals
+    Nível 1 (sempre): valida se o CST existe na Tabela A (regime normal, 00–90)
+    ou Tabela B (Simples Nacional, 101–900). Códigos fora dessas tabelas causam
+    rejeição na recepção do SPED.
+
+    Nível 2 (quando regime_tributario disponível no TenantConfig):
+    - lucro_real / lucro_presumido: apenas Tabela A (00–90)
+    - simples_nacional: apenas Tabela B (101–900); uso de 00-90 indica
+      erro de enquadramento ou escrituração fora do Simples
     """
     rule_id = "cst_incompativel"
-    rule_version = "1.0.0"
+    rule_version = "2.0.0"
     depends_on = []
 
-    def execute(self, fiscal_document, items, config) -> RuleResult:
-        # In MVP: regime is unknown (not stored on FiscalDocument yet)
-        # Rule passes; future enhancement: read regime from tenant config or emitter master
+    # Tabela A — regime normal (Lucro Real, Lucro Presumido)
+    _CST_TABELA_A = {
+        "00", "10", "20", "30", "40", "41", "50", "51", "60", "70", "90",
+    }
 
+    # Tabela B — Simples Nacional
+    _CST_TABELA_B = {
+        "101", "102", "103", "201", "202", "203", "300", "400", "500", "900",
+    }
+
+    _ALL_VALID_CSTS = _CST_TABELA_A | _CST_TABELA_B
+
+    # Which regimes use which table
+    _REGIME_TO_TABLE = {
+        "lucro_real": _CST_TABELA_A,
+        "lucro_presumido": _CST_TABELA_A,
+        "simples_nacional": _CST_TABELA_B,
+    }
+
+    def execute(self, fiscal_document, items, config) -> RuleResult:
         if not items:
             return self._pass("NF-e sem itens", input_snapshot={})
 
-        # Validation would go here once regime is available
-        valid_csts = ["00", "01", "02", "03", "04", "05", "06", "07", "08", "09"]
+        regime = (config.get("regime_tributario") or "").lower().strip()
+        csts_presentes = {item.cst for item in items if item.cst}
 
-        invalid_items = [item for item in items if item.cst not in valid_csts]
+        # Nível 2: regime conhecido — valida compatibilidade de tabela
+        if regime in self._REGIME_TO_TABLE:
+            allowed = self._REGIME_TO_TABLE[regime]
+            wrong_table_csts = sorted(csts_presentes - allowed)
+            wrong_items = [item for item in items if item.cst and item.cst in wrong_table_csts]
 
-        if not invalid_items:
+            if wrong_table_csts:
+                table_name = "B (Simples Nacional)" if regime == "simples_nacional" else "A (regime normal)"
+                other_table = "A (regime normal)" if regime == "simples_nacional" else "B (Simples Nacional)"
+                return self._fail(
+                    SeverityLevel.CRITICAL,
+                    f"{len(wrong_items)} item(ns) com CST de tabela {other_table} incompatível com regime "
+                    f"'{regime}' — deve usar tabela {table_name}: {wrong_table_csts}",
+                    input_snapshot={
+                        "regime_tributario": regime,
+                        "num_itens_invalidos": len(wrong_items),
+                        "csts_invalidos": wrong_table_csts,
+                        "tabela_correta": table_name,
+                        "total_itens": len(items),
+                    },
+                    config_applied={"regime_tributario": regime},
+                )
+
             return self._pass(
-                f"CST válidos em todos os {len(items)} itens",
+                f"CST ICMS compatíveis com regime '{regime}' em todos os {len(items)} itens",
                 input_snapshot={
+                    "regime_tributario": regime,
                     "num_itens": len(items),
-                    "csts": list(set(item.cst for item in items)),
+                    "csts": sorted(csts_presentes),
                 },
+                config_applied={"regime_tributario": regime},
+            )
+
+        # Nível 1: regime desconhecido — valida apenas existência nas tabelas
+        invalid_csts = sorted(csts_presentes - self._ALL_VALID_CSTS)
+        invalid_items = [item for item in items if item.cst and item.cst in invalid_csts]
+
+        if not invalid_csts:
+            return self._pass(
+                f"CST ICMS válidos em todos os {len(items)} itens (tabelas A e B — regime não configurado)",
+                input_snapshot={"num_itens": len(items), "csts": sorted(csts_presentes)},
             )
 
         return self._fail(
             SeverityLevel.WARNING,
-            f"{len(invalid_items)} item(ns) com CST inválido: {set(item.cst for item in invalid_items)}",
+            f"{len(invalid_items)} item(ns) com CST ICMS inexistente no Anexo I: {invalid_csts} — "
+            f"verificar tabela A (regime normal) ou B (Simples Nacional)",
             input_snapshot={
                 "num_itens_invalidos": len(invalid_items),
-                "csts_invalidos": list(set(item.cst for item in invalid_items)),
+                "csts_invalidos": invalid_csts,
                 "total_itens": len(items),
             },
         )
@@ -282,43 +399,106 @@ class CstIncompatiavelRule(BaseRule):
 @register
 class CfopInvalidoRule(BaseRule):
     """
-    Invalid CFOP (fiscal operation code) for operation type.
-    Detects: CFOP not aligned with invoice type (intra/interstate, inbound/outbound, nature).
+    CFOP inválido ou incompatível com a natureza da operação.
 
-    Rules:
-    - CFOP 5xxx (outbound) invalid if destination is same UF as origin
-    - CFOP 6xxx (inbound) invalid if destination is same UF as origin
-    - CFOP 1xxx invalid for inbound operations
-    - Return invoices (devolução) require referenced NF
+    Nível 1 (fallback): quando cfop_reference não está disponível no config,
+    valida apenas o formato (4 dígitos, primeiro dígito 1-9). Isso ocorre
+    antes da primeira execução da migration 003.
+
+    Nível 2 (quando valid_cfops + cfop_metadata presentes via RuleService.get_config):
+    - Rejeita CFOPs que não existem na tabela ADE COTEPE (CRITICAL)
+    - Valida que CFOPs 5xxx/6xxx/7xxx são usados em operações de saída (WARNING)
+    - Valida que CFOPs 1xxx/2xxx/3xxx são usados em operações de entrada (WARNING)
     """
     rule_id = "cfop_invalido"
-    rule_version = "1.0.0"
+    rule_version = "2.0.0"
     depends_on = []
+
+    _SAIDA_PREFIXES = {"5", "6", "7"}
+    _ENTRADA_PREFIXES = {"1", "2", "3"}
 
     def execute(self, fiscal_document, items, config) -> RuleResult:
         if not items:
             return self._pass("NF-e sem itens", input_snapshot={})
 
-        # Extract CFOPs from items
-        cfops = set(item.cfop for item in items)
+        cfops = [item.cfop for item in items if item.cfop]
+        cfops_unicos = set(cfops)
 
-        # Basic validation: CFOP must be 4 digits, starting with 1-9
-        invalid_cfops = [cfop for cfop in cfops if not (len(cfop) == 4 and cfop[0] in "123456789")]
+        if not cfops_unicos:
+            return self._pass(
+                "Itens sem CFOP — regra não aplicável",
+                input_snapshot={"num_itens": len(items)},
+            )
 
-        if invalid_cfops:
+        valid_cfops: set = config.get("valid_cfops")
+        cfop_metadata: dict = config.get("cfop_metadata", {})
+
+        # Nível 1: sem tabela de referência — valida apenas formato
+        if not valid_cfops:
+            malformed = sorted(
+                c for c in cfops_unicos
+                if not (len(c) == 4 and c[0] in "123456789" and c.isdigit())
+            )
+            if malformed:
+                return self._fail(
+                    SeverityLevel.WARNING,
+                    f"CFOP(s) com formato inválido: {malformed} — deve ter 4 dígitos numéricos começando por 1-9",
+                    input_snapshot={
+                        "cfops_invalidos": malformed,
+                        "cfops_utilizados": sorted(cfops_unicos),
+                    },
+                )
+            return self._pass(
+                f"CFOPs com formato válido em todos os {len(items)} itens (tabela CFOP não disponível — validação parcial)",
+                input_snapshot={"cfops_utilizados": sorted(cfops_unicos), "num_itens": len(items)},
+            )
+
+        # Nível 2: tabela ADE COTEPE disponível
+
+        # 2a. CFOPs inexistentes na tabela oficial
+        inexistentes = sorted(cfops_unicos - valid_cfops)
+        if inexistentes:
             return self._fail(
-                SeverityLevel.WARNING,
-                f"CFOP(s) inválido(s): {invalid_cfops}",
+                SeverityLevel.CRITICAL,
+                f"CFOP(s) inexistente(s) na tabela ADE COTEPE: {inexistentes} — "
+                f"causará rejeição no SPED",
                 input_snapshot={
-                    "cfops_invalidos": invalid_cfops,
-                    "cfops_utilizados": list(cfops),
+                    "cfops_inexistentes": inexistentes,
+                    "cfops_utilizados": sorted(cfops_unicos),
+                    "num_itens": len(items),
                 },
             )
 
+        # 2b. Compatibilidade com natureza da operação (entrada/saída)
+        natureza = (fiscal_document.natureza or "").lower().strip()
+        is_saida = natureza in {"saida", "saída"}
+        is_entrada = natureza in {"entrada"}
+
+        if is_saida or is_entrada:
+            esperado_prefixes = self._SAIDA_PREFIXES if is_saida else self._ENTRADA_PREFIXES
+            wrong_cfops = sorted(
+                c for c in cfops_unicos
+                if c[0] not in esperado_prefixes
+            )
+            if wrong_cfops:
+                tipo_esperado = "saída (5xxx/6xxx/7xxx)" if is_saida else "entrada (1xxx/2xxx/3xxx)"
+                return self._fail(
+                    SeverityLevel.WARNING,
+                    f"CFOP(s) incompatível(is) com natureza '{natureza}': {wrong_cfops} — "
+                    f"operação de {natureza} deve usar CFOPs de {tipo_esperado}",
+                    input_snapshot={
+                        "natureza": natureza,
+                        "cfops_incompativeis": wrong_cfops,
+                        "cfops_utilizados": sorted(cfops_unicos),
+                        "num_itens": len(items),
+                    },
+                )
+
         return self._pass(
-            f"CFOPs válidos em todos os {len(items)} itens: {sorted(cfops)}",
+            f"CFOPs válidos (ADE COTEPE) em todos os {len(items)} itens: {sorted(cfops_unicos)}",
             input_snapshot={
-                "cfops_utilizados": list(cfops),
+                "cfops_utilizados": sorted(cfops_unicos),
                 "num_itens": len(items),
+                "validacao": "nivel_2_com_tabela_referencia",
             },
         )

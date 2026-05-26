@@ -72,6 +72,25 @@ def hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
+def mask_chave_acesso(chave: str) -> str:
+    """
+    Mask the CNPJ portion of an NF-e/CT-e chave de acesso for LGPD compliance.
+
+    A 44-digit chave de acesso has the CNPJ emitente at positions 6–19 (14 digits).
+    This function replaces those digits with '***' before logging.
+
+    Args:
+        chave: 44-character chave de acesso string
+
+    Returns:
+        Masked string with CNPJ replaced by '***', or original if input is not a
+        44-digit string (e.g. None, empty, already-masked).
+    """
+    if not isinstance(chave, str) or len(chave) != 44 or not chave.isdigit():
+        return str(chave) if chave is not None else ""
+    return chave[:6] + "***" + chave[20:]
+
+
 def verify_access_token(token: str) -> Dict:
     """
     Verify and decode a JWT access token

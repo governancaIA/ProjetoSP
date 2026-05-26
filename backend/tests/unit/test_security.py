@@ -2,7 +2,9 @@
 Tests for JWT security utilities
 """
 import pytest
+from decimal import Decimal
 from datetime import timedelta, datetime, timezone
+from unittest.mock import MagicMock
 from jose import JWTError
 
 from app.core.security import (
@@ -12,6 +14,7 @@ from app.core.security import (
     create_refresh_token,
     hash_token,
     verify_access_token,
+    mask_chave_acesso,
 )
 from app.core.config import settings
 
@@ -141,3 +144,116 @@ class TestJWTTokens:
         """Test that token without 'tenant_id' claim is rejected"""
         # Similar to above - would require manual token creation
         pass
+
+
+class TestMaskChaveAcesso:
+    """Tests for LGPD-compliant chave de acesso masking (EPIC 13 AC3)"""
+
+    _VALID_CHAVE = "35180166047275000199550010000000011234567890"
+
+    def test_masks_cnpj_portion(self):
+        """CNPJ at positions 6-19 (14 digits) must be replaced with '***'"""
+        # chave: 351801 | 66047275000199 | 550010000000011234567890
+        #         [0:6]      [6:20]              [20:]
+        result = mask_chave_acesso(self._VALID_CHAVE)
+        assert result == "351801***550010000000011234567890"
+
+    def test_cnpj_not_in_result(self):
+        """The original 14-digit CNPJ must not appear in the masked output"""
+        cnpj = self._VALID_CHAVE[6:20]  # "66047275000199"
+        result = mask_chave_acesso(self._VALID_CHAVE)
+        assert cnpj not in result
+
+    def test_prefix_and_suffix_preserved(self):
+        """First 6 chars and last 24 chars must be preserved unchanged"""
+        result = mask_chave_acesso(self._VALID_CHAVE)
+        assert result.startswith(self._VALID_CHAVE[:6])
+        assert result.endswith(self._VALID_CHAVE[20:])
+
+    def test_empty_string_returns_empty(self):
+        result = mask_chave_acesso("")
+        assert result == ""
+
+    def test_none_returns_empty_string(self):
+        result = mask_chave_acesso(None)
+        assert result == ""
+
+    def test_short_string_returned_as_is(self):
+        """Strings shorter than 44 chars are returned unchanged (not a chave)"""
+        short = "12345678"
+        result = mask_chave_acesso(short)
+        assert result == short
+
+    def test_non_digit_string_returned_as_is(self):
+        """Non-numeric 44-char strings (malformed) returned unchanged"""
+        non_digit = "A" * 44
+        result = mask_chave_acesso(non_digit)
+        assert result == non_digit
+
+    def test_non_string_converted_and_returned(self):
+        """Non-string values are coerced to str and returned (not masked)"""
+        result = mask_chave_acesso(12345)
+        assert result == "12345"
+
+
+class TestFiscalRulesLgpdMasking:
+    """Verify that fiscal rule messages/snapshots never expose raw chave_acesso (EPIC 13 AC3)"""
+
+    _VALID_CHAVE = "35180166047275000199550010000000011234567890"
+    _CNPJ_IN_CHAVE = "66047275000199"
+
+    def _make_doc(self, **kwargs):
+        doc = MagicMock()
+        doc.chave_acesso = self._VALID_CHAVE
+        doc.numero_nf = "000001"
+        doc.serie = "001"
+        doc.status_nfe = "cancelado"
+        doc.natureza = "saída"
+        doc.valor_total = Decimal("1000.00")
+        doc.valor_icms = Decimal("120.00")
+        for k, v in kwargs.items():
+            setattr(doc, k, v)
+        return doc
+
+    def _make_item(self, cfop="1101"):
+        item = MagicMock()
+        item.cfop = cfop
+        item.cst = "00"
+        item.valor_item = Decimal("1000.00")
+        item.valor_icms = Decimal("120.00")
+        return item
+
+    def test_nfe_cancelada_message_no_cnpj(self):
+        from app.validators.rules.fiscal_rules import NfeCanceladaNoSpedRule
+        rule = NfeCanceladaNoSpedRule()
+        result = rule.execute(self._make_doc(), [], {})
+        assert self._CNPJ_IN_CHAVE not in result.message
+        assert self._CNPJ_IN_CHAVE not in str(result.input_snapshot)
+
+    def test_nfe_cancelada_snapshot_uses_masked_chave(self):
+        from app.validators.rules.fiscal_rules import NfeCanceladaNoSpedRule
+        rule = NfeCanceladaNoSpedRule()
+        result = rule.execute(self._make_doc(), [], {})
+        assert result.input_snapshot["chave_acesso"] == "351801***550010000000011234567890"
+
+    def test_saida_sem_lancamento_snapshot_no_cnpj(self):
+        from app.validators.rules.fiscal_rules import SaidaSemLancamentoRule
+        rule = SaidaSemLancamentoRule()
+        item = self._make_item(cfop="1101")  # entrada CFOP on saída doc → triggers fail
+        result = rule.execute(self._make_doc(natureza="saída"), [item], {})
+        assert self._CNPJ_IN_CHAVE not in str(result.input_snapshot)
+
+    def test_cte_cancelado_message_no_cnpj(self):
+        from app.validators.rules.fiscal_rules import CteCanceladoRule
+        rule = CteCanceladoRule()
+        doc = self._make_doc(natureza="transporte", status_nfe="cancelado")
+        result = rule.execute(doc, [], {})
+        assert self._CNPJ_IN_CHAVE not in result.message
+        assert self._CNPJ_IN_CHAVE not in str(result.input_snapshot)
+
+    def test_cte_cancelado_snapshot_uses_masked_chave(self):
+        from app.validators.rules.fiscal_rules import CteCanceladoRule
+        rule = CteCanceladoRule()
+        doc = self._make_doc(natureza="transporte", status_nfe="cancelado")
+        result = rule.execute(doc, [], {})
+        assert result.input_snapshot["chave_acesso"] == "351801***550010000000011234567890"
