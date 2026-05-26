@@ -341,15 +341,21 @@ class CstIncompatiavelRule(BaseRule):
         regime = (config.get("regime_tributario") or "").lower().strip()
         csts_presentes = {item.cst for item in items if item.cst}
 
+        # Resolve valid sets: prefer DB-loaded sets, fall back to hardcoded
+        valid_csts_regime: set | None = config.get("valid_csts_regime")
+        valid_csts_all: set = config.get("valid_csts_all") or self._ALL_VALID_CSTS
+
         # Nível 2: regime conhecido — valida compatibilidade de tabela
         if regime in self._REGIME_TO_TABLE:
-            allowed = self._REGIME_TO_TABLE[regime]
+            # DB-sourced set takes priority; fall back to hardcoded regime table
+            allowed = valid_csts_regime if valid_csts_regime is not None else self._REGIME_TO_TABLE[regime]
             wrong_table_csts = sorted(csts_presentes - allowed)
             wrong_items = [item for item in items if item.cst and item.cst in wrong_table_csts]
 
             if wrong_table_csts:
                 table_name = "B (Simples Nacional)" if regime == "simples_nacional" else "A (regime normal)"
                 other_table = "A (regime normal)" if regime == "simples_nacional" else "B (Simples Nacional)"
+                source = "banco" if valid_csts_regime is not None else "hardcoded"
                 return self._fail(
                     SeverityLevel.CRITICAL,
                     f"{len(wrong_items)} item(ns) com CST de tabela {other_table} incompatível com regime "
@@ -360,6 +366,7 @@ class CstIncompatiavelRule(BaseRule):
                         "csts_invalidos": wrong_table_csts,
                         "tabela_correta": table_name,
                         "total_itens": len(items),
+                        "fonte_cst": source,
                     },
                     config_applied={"regime_tributario": regime},
                 )
@@ -375,7 +382,7 @@ class CstIncompatiavelRule(BaseRule):
             )
 
         # Nível 1: regime desconhecido — valida apenas existência nas tabelas
-        invalid_csts = sorted(csts_presentes - self._ALL_VALID_CSTS)
+        invalid_csts = sorted(csts_presentes - valid_csts_all)
         invalid_items = [item for item in items if item.cst and item.cst in invalid_csts]
 
         if not invalid_csts:

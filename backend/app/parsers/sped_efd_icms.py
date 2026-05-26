@@ -1,16 +1,25 @@
 """
-SPED EFD ICMS/IPI Parser (US-1.4)
+SPED EFD ICMS/IPI Parser
 
-Parses pipe-delimited SPED files line-by-line and extracts:
-- C100: NF headers
+Parses pipe-delimited SPED files and extracts:
+- 0000: file header (version, CNPJ, period, regime)
+- C100: NF-e headers (with cancellation status from C110)
 - C170: Item details with tax info
 - D100: CT-e headers
-- E110: ICMS apuracao
+- E110: ICMS apuração
+
+Supports automatic encoding detection (Latin-1 / UTF-8) and
+multi-version layout mapping via the 0000 record.
 """
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 import logging
-from enum import Enum
+
+try:
+    import chardet
+    _CHARDET_AVAILABLE = True
+except ImportError:
+    _CHARDET_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -20,70 +29,130 @@ class ParseError(Exception):
     pass
 
 
-class CST(str, Enum):
-    """CST (Código de Situação Tributária) codes for ICMS"""
-    # Tributado
-    CST_00 = "00"  # Tributada integralmente
-    CST_10 = "10"  # Tributada com suspensão
-    CST_20 = "20"  # Com redução de base
-    CST_30 = "30"  # Isenta
-    CST_40 = "40"  # Não tributada
-    CST_41 = "41"  # Não tributada (exportação)
-    CST_50 = "50"  # Suspensão
-    CST_60 = "60"  # ICMS cobrado anteriormente
-    CST_70 = "70"  # Com redução e cobrança do ICMS
-    CST_90 = "90"  # Outras
+# Known SPED EFD ICMS/IPI layout versions and their 0000 field positions.
+# Based on Guia Prático EFD-ICMS/IPI (ENCAT/SEFAZ).
+#
+# From version 002 onwards (as observed in real files):
+#   pos 0=cod_ver, 1=cod_fin, 2=dt_ini, 3=dt_fin, 4=nome, 5=cnpj, 6=cpf_or_empty,
+#   7=uf, 8=cod_mun, 9=suframa, 10=ind_perfil, 11=ind_ativ
+#
+# Real file ARAMEFICIO (versão 012, jan/2018) confirms this layout:
+#   |0000|012|0|01012018|31012018|NOME|66047275000199||SP|719006029118|3557204|||A|0|
+#   fields after record type: [012, 0, dt_ini, dt_fin, nome, CNPJ, "", SP, ...]
+_LAYOUT_STANDARD: Dict[str, int] = {
+    "cod_ver": 0, "cod_fin": 1, "dt_ini": 2, "dt_fin": 3, "nome": 4,
+    "cnpj": 5, "cpf": 6, "uf": 7, "cod_mun": 8, "suframa": 9,
+    "ind_perfil": 10, "ind_ativ": 11,
+}
+
+_LAYOUT_VERSIONS: Dict[str, Dict[str, int]] = {
+    v: _LAYOUT_STANDARD for v in (
+        "002", "003", "004", "005", "006", "007", "008", "009",
+        "010", "011", "012", "013", "014", "015", "016", "017",
+    )
+}
+# Versions not in the map above use the standard layout as a fallback
+_LATEST_LAYOUT = _LAYOUT_STANDARD
+
+# C110 cancellation event code (Evento 110111 = cancelamento NF-e)
+_CANCEL_COD = "110111"
+
+
+def _detect_encoding(raw: bytes) -> str:
+    """Detect file encoding, returning a Python codec name."""
+    if _CHARDET_AVAILABLE:
+        result = chardet.detect(raw[:65536])  # sample first 64 KB
+        encoding = result.get("encoding") or "utf-8"
+        confidence = result.get("confidence", 0)
+        if confidence < 0.7:
+            # Low confidence: SPED files pre-2015 are almost always Latin-1
+            encoding = "latin-1"
+        return encoding
+    # Fallback: try UTF-8, then Latin-1
+    try:
+        raw.decode("utf-8")
+        return "utf-8"
+    except UnicodeDecodeError:
+        return "latin-1"
+
+
+def _get_layout(version: str) -> Dict[str, int]:
+    """Return the field-position map for a given SPED version string."""
+    # Normalize: "017" == "17" == "Versão 17"
+    v = version.strip().lstrip("0") or "0"
+    # Pad to 3 digits for lookup
+    v_padded = v.zfill(3)
+    if v_padded in _LAYOUT_VERSIONS:
+        return _LAYOUT_VERSIONS[v_padded]
+    # If version >= 17, use latest; otherwise use oldest known
+    try:
+        if int(v) >= 17:
+            return _LATEST_LAYOUT
+        return _LAYOUT_VERSIONS["016"]
+    except ValueError:
+        return _LATEST_LAYOUT
 
 
 class SPEDRecord:
-    """Base class for SPED record parsing"""
+    """Utility methods for pipe-delimited record parsing."""
 
     @staticmethod
     def parse_field(fields: List[str], index: int, default: str = "") -> str:
-        """Safely extract field from pipe-delimited line"""
         if index < len(fields):
             return fields[index]
         return default
 
     @staticmethod
     def parse_decimal(value: str, default: float = 0.0) -> float:
-        """Parse decimal value safely (handles comma as decimal separator)"""
         if not value:
             return default
         try:
-            # SPED uses comma as decimal separator
-            normalized = value.replace(',', '.')
-            return float(normalized)
+            return float(value.replace(",", "."))
         except ValueError:
             return default
 
 
+class Record0000(SPEDRecord):
+    """SPED file header — record 0000."""
+
+    @staticmethod
+    def parse(fields: List[str], layout: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+        if layout is None:
+            # Without a known version, use raw positional extraction
+            layout = _LATEST_LAYOUT
+
+        def _f(key: str) -> str:
+            idx = layout.get(key, -1)
+            return Record0000.parse_field(fields, idx) if idx >= 0 else ""
+
+        return {
+            "record_type": "0000",
+            "cod_ver": _f("cod_ver"),
+            "cod_fin": _f("cod_fin"),
+            "dt_ini": _f("dt_ini"),
+            "dt_fin": _f("dt_fin"),
+            "nome": _f("nome"),
+            "cnpj": _f("cnpj"),
+            "uf": _f("uf"),
+            "cod_mun": _f("cod_mun"),
+            "ind_perfil": _f("ind_perfil"),
+            "ind_ativ": _f("ind_ativ"),
+        }
+
+
 class C100Record(SPEDRecord):
-    """NF-e Header Record (C100)"""
+    """NF-e Header Record (C100)."""
 
     @staticmethod
     def parse(fields: List[str]) -> Dict[str, Any]:
-        """
-        Parse C100 record: [ind_mov,ind_emitente,serie,modelo,numero_nf,...]
+        ind_emitente = C100Record.parse_field(fields, 1)
+        natureza = "saida" if ind_emitente == "0" else "entrada"
 
-        Fields (0-indexed, after removing record type):
-        0: ind_mov
-        1: ind_emitente
-        2: serie (numeric)
-        3: modelo (55=NFe, 01=CTe)
-        4: serie_nf_ecf (alpha)
-        5: ???
-        6: numero_nf
-        7: chave_acesso
-        8: data_emissao
-        9: data_saida_entrada
-        10: valor_total
-        ... and more
-        """
         return {
             "record_type": "C100",
             "ind_mov": C100Record.parse_field(fields, 0),
-            "ind_emitente": C100Record.parse_field(fields, 1),
+            "ind_emitente": ind_emitente,
+            "natureza": natureza,
             "serie": C100Record.parse_field(fields, 2),
             "modelo": C100Record.parse_field(fields, 3),
             "serie_nf_ecf": C100Record.parse_field(fields, 4),
@@ -105,32 +174,15 @@ class C100Record(SPEDRecord):
             "valor_ipi": C100Record.parse_field(fields, 20),
             "valor_pis": C100Record.parse_field(fields, 21),
             "valor_cofins": C100Record.parse_field(fields, 22),
+            "cancelado": False,   # updated when a child C110 with cod_inf=110111 is found
         }
 
 
 class C170Record(SPEDRecord):
-    """NF-e Item Detail Record (C170)"""
+    """NF-e Item Detail Record (C170)."""
 
     @staticmethod
     def parse(fields: List[str]) -> Dict[str, Any]:
-        """
-        Parse C170 record: [numero_seq,codigo_item,descricao,...]
-
-        Fields (0-indexed):
-        0: numero_sequencial
-        1: codigo_item
-        2: descricao
-        3: (empty/unused)
-        4: quantidade
-        5: unidade
-        6: valor_unitario
-        7: valor_desc
-        8: ind_mov
-        9: cfop
-        10: cst
-        11: valor_icms
-        ... etc
-        """
         return {
             "record_type": "C170",
             "numero_sequencial": C170Record.parse_field(fields, 0),
@@ -156,11 +208,10 @@ class C170Record(SPEDRecord):
 
 
 class D100Record(SPEDRecord):
-    """CT-e Header Record (D100)"""
+    """CT-e Header Record (D100)."""
 
     @staticmethod
     def parse(fields: List[str]) -> Dict[str, Any]:
-        """Parse D100 record: [ind_emitente,ind_cte,serie,numero_cte,...]"""
         return {
             "record_type": "D100",
             "ind_emitente": D100Record.parse_field(fields, 0),
@@ -176,11 +227,10 @@ class D100Record(SPEDRecord):
 
 
 class E110Record(SPEDRecord):
-    """ICMS Apuração Record (E110)"""
+    """ICMS Apuração Record (E110)."""
 
     @staticmethod
     def parse(fields: List[str]) -> Dict[str, Any]:
-        """Parse E110 record: [valor_total_bc,aliq_icms,valor_icms,...]"""
         return {
             "record_type": "E110",
             "valor_total_bc": E110Record.parse_field(fields, 0),
@@ -193,37 +243,46 @@ class E110Record(SPEDRecord):
 
 
 class SPEDParser:
-    """Main SPED EFD ICMS/IPI parser"""
+    """Main SPED EFD ICMS/IPI parser."""
 
     def __init__(self, tenant_id: str):
-        """Initialize parser for a specific tenant"""
         self.tenant_id = tenant_id
         self.warnings: List[str] = []
 
+    def parse_bytes(self, raw: bytes) -> Dict[str, Any]:
+        """
+        Parse raw bytes, auto-detecting encoding before decode.
+
+        Prefer this over parse() when you have bytes (file upload, MinIO read).
+        """
+        encoding = _detect_encoding(raw)
+        try:
+            content = raw.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            content = raw.decode("latin-1", errors="replace")
+            self.warnings.append(f"Encoding fallback to latin-1 (detected: {encoding})")
+        return self.parse(content)
+
     def parse(self, content: str) -> Dict[str, Any]:
         """
-        Parse SPED content line-by-line
-
-        Args:
-            content: Full SPED file content as string
+        Parse SPED content string line-by-line.
 
         Returns:
             {
-                "C100": [...],  # NF headers
-                "C170": [...],  # Items with tax info
-                "D100": [...],  # CT-e headers
-                "E110": [...],  # ICMS apuracao
+                "0000": {...},       # file header metadata
+                "C100": [...],       # NF headers (cancelado=True when C110 found)
+                "C170": [...],       # items
+                "D100": [...],       # CT-e headers
+                "E110": [...],       # ICMS apuração
                 "metadata": {...}
             }
-
-        Raises:
-            ParseError: If content is empty or invalid
         """
         if not content or not content.strip():
             raise ParseError("SPED content is empty")
 
         self.warnings = []
-        result = {
+        result: Dict[str, Any] = {
+            "0000": {},
             "C100": [],
             "C170": [],
             "D100": [],
@@ -231,19 +290,20 @@ class SPEDParser:
             "metadata": {},
         }
 
-        lines = content.split('\n')
-        current_c100: Dict[str, Any] | None = None
+        lines = content.split("\n")
+        current_c100: Optional[Dict[str, Any]] = None
+        file_version: str = ""
+        layout: Dict[str, int] = _LATEST_LAYOUT
+        line_num = 0
 
         for line_num, line in enumerate(lines, start=1):
             line = line.strip()
             if not line:
                 continue
 
-            fields = line.split('|')
+            fields = line.split("|")
 
-            # Handle both formats: |RECORD| and RECORD|
-            # If line starts with |, fields[0] is empty and record_type is fields[1]
-            # Otherwise, record_type is fields[0]
+            # Handle both |RECORD|... and RECORD|... formats
             if fields[0] == "" and len(fields) > 1:
                 record_type = fields[1]
                 offset = 1
@@ -251,57 +311,75 @@ class SPEDParser:
                 record_type = fields[0]
                 offset = 0
             else:
-                self.warnings.append(f"Line {line_num}: Invalid format")
+                self.warnings.append(f"Line {line_num}: invalid format")
                 continue
 
-            try:
-                # Extract actual data fields (skip record type)
-                if offset > 0:
-                    # Line starts with |record_type|, so skip fields[0] and fields[1]
-                    data_fields = fields[offset + 1:]
-                else:
-                    # Line starts with record_type|, so skip just the record type
-                    data_fields = fields[1:]
+            # Data fields start after the record type field
+            data_fields = fields[offset + 1:]
 
-                if record_type == "C100":
+            try:
+                if record_type == "0000":
+                    # First pass: extract version to select layout
+                    raw_ver = data_fields[0] if data_fields else ""
+                    layout = _get_layout(raw_ver)
+                    file_version = raw_ver
+                    result["0000"] = Record0000.parse(data_fields, layout)
+                    if raw_ver and raw_ver not in _LAYOUT_VERSIONS:
+                        self.warnings.append(
+                            f"Versão SPED desconhecida '{raw_ver}' — usando layout mais recente"
+                        )
+
+                elif record_type == "C100":
                     record = C100Record.parse(data_fields)
-                    record["items"] = []  # C170 filhos serão adicionados aqui
+                    record["items"] = []
                     result["C100"].append(record)
                     current_c100 = record
+
+                elif record_type == "C110":
+                    # C110: NF-e complementary info — may carry cancellation event
+                    cod_inf = data_fields[0] if data_fields else ""
+                    if cod_inf == _CANCEL_COD and current_c100 is not None:
+                        current_c100["cancelado"] = True
 
                 elif record_type == "C170":
                     record = C170Record.parse(data_fields)
                     result["C170"].append(record)
-                    # Associa ao C100 pai atual (relação hierárquica do SPED)
                     if current_c100 is not None:
                         current_c100["items"].append(record)
 
                 elif record_type == "D100":
                     record = D100Record.parse(data_fields)
                     result["D100"].append(record)
-                    current_c100 = None  # D100 encerra o bloco C
+                    current_c100 = None  # D100 ends block C
 
                 elif record_type == "E110":
-                    record = E110Record.parse(data_fields)
-                    result["E110"].append(record)
+                    result["E110"].append(E110Record.parse(data_fields))
 
-                elif record_type in ["9", "0"]:
-                    # Trailer (9) and header (0) - skip
-                    pass
+                elif record_type in ("9", "0"):
+                    pass  # trailer / block headers
 
-            except Exception as e:
-                self.warnings.append(f"Line {line_num}: Failed to parse {record_type}: {str(e)}")
-                logger.warning(f"Line {line_num}: Failed to parse {record_type}: {str(e)}")
+            except Exception as exc:
+                self.warnings.append(f"Line {line_num}: failed to parse {record_type}: {exc}")
+                logger.warning("Line %d: failed to parse %s: %s", line_num, record_type, exc)
+
+        # Post-process: propagate cancellation to status_nfe field for document_service
+        for c100 in result["C100"]:
+            if c100.get("cancelado"):
+                c100["status_nfe"] = "cancelado"
+            else:
+                c100.setdefault("status_nfe", "autorizado")
 
         result["metadata"] = {
             "tenant_id": self.tenant_id,
+            "file_version": file_version,
+            "layout_used": "017" if layout is _LATEST_LAYOUT else file_version.zfill(3),
             "total_c100_records": len(result["C100"]),
             "total_c170_records": len(result["C170"]),
             "total_d100_records": len(result["D100"]),
             "total_e110_records": len(result["E110"]),
             "parsed_at": datetime.now(timezone.utc).isoformat(),
             "warnings": self.warnings,
-            "total_lines_processed": line_num if 'line_num' in locals() else 0,
+            "total_lines_processed": line_num,
         }
 
         return result

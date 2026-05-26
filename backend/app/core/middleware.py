@@ -8,6 +8,7 @@ from starlette.responses import Response
 from jose import jwt, JWTError
 
 from app.core.config import settings
+from app.core.logging_config import LogContext
 
 # Paths that do not require tenant context (public / pre-auth)
 _SKIP_PATHS = frozenset({
@@ -37,7 +38,11 @@ class TenantMiddleware(BaseHTTPMiddleware):
             tenant_id = _extract_tenant_id(request)
 
         request.state.tenant_id = tenant_id
-        return await call_next(request)
+        token = LogContext.set_tenant(tenant_id)
+        try:
+            return await call_next(request)
+        finally:
+            LogContext.reset_tenant(token)
 
 
 def _extract_tenant_id(request: Request) -> str | None:

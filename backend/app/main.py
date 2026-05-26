@@ -1,6 +1,20 @@
+# -*- coding: utf-8 -*-
 """
 FiscalAI - FastAPI Application Entry Point
 """
+import sys
+import io
+# Force UTF-8 stdout/stderr on Windows to avoid cp1252 emoji errors
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+# Configure structured JSON logging before any module creates a logger
+from app.core.logging_config import configure_logging as _configure_logging
+from app.core.config import settings as _boot_settings
+_configure_logging(_boot_settings.LOG_LEVEL)
+del _configure_logging, _boot_settings
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -29,9 +43,9 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("SECRET_KEY must be changed from default in production")
 
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created")
+    print("[OK] Database tables created")
     yield
-    print("🛑 Shutting down FiscalAI")
+    print("[STOP] Shutting down FiscalAI")
 
 
 app = FastAPI(

@@ -61,5 +61,5 @@ def create_tenant_schema(tenant_id: str) -> None:
     schema_name = f"tenant_{tenant_id}"
     with engine.connect() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
-        Base.metadata.create_all(bind=engine, schema=schema_name)
         conn.commit()
+    Base.metadata.create_all(bind=engine)

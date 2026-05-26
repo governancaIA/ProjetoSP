@@ -1,4 +1,4 @@
-"""
+﻿"""
 Scoring service for fiscal risk assessment and alert prioritization
 Transforms raw rule results into actionable risk scores and financial exposure estimates.
 """
@@ -29,7 +29,7 @@ class ScoringService:
     Service for calculating fiscal risk scores based on rule execution results.
 
     Scoring model:
-    1. Per-alert score: RuleExecutionLog severity → AlertSeverity + exposure in R$
+    1. Per-alert score: RuleExecutionLog severity -> AlertSeverity + exposure in R$
     2. Per-document score: aggregate of all alerts for that document
     3. Per-period score: 0-100 scale for a competência (month)
     4. Trend: month-over-month evolution
@@ -95,7 +95,7 @@ class ScoringService:
             return (AlertSeverity.INFORMATIVE, Decimal("0.00"))
 
         # Passed rule = no severity/exposure
-        # Failed rules: map RuleLog severity → AlertSeverity + exposure
+        # Failed rules: map RuleLog severity -> AlertSeverity + exposure
 
         # Retrieve penalty config for this rule
         penalty_config = ScoringService.PENALTY_BASE_RATES.get(
@@ -111,7 +111,7 @@ class ScoringService:
             rule_log, fiscal_document, penalty_config
         )
 
-        # Map rule severity → alert severity based on exposure
+        # Map rule severity -> alert severity based on exposure
         if rule_log.severity == SeverityLevel.CRITICAL:
             return (AlertSeverity.CRITICAL, exposure)
 
@@ -208,7 +208,8 @@ class ScoringService:
         if not fiscal_doc:
             return {"error": f"FiscalDocument {fiscal_document_id} not found"}
 
-        # Fetch all rule logs for this document
+        # Single query for this document's logs — no N+1: fiscal_doc is already
+        # fetched above and passed directly to calculate_alert_severity().
         rule_logs = (
             db.query(RuleExecutionLog)
             .filter_by(fiscal_document_id=fiscal_document_id)
@@ -381,19 +382,19 @@ class ScoringService:
             List of alerts sorted by priority (highest first)
         """
         from app.models.fiscal_document import FiscalDocument
+        from sqlalchemy.orm import joinedload
 
-        # Fetch all failed rule logs
+        # Single query: failed logs with their documents pre-loaded (no N+1)
         rule_logs = (
             db.query(RuleExecutionLog)
+            .options(joinedload(RuleExecutionLog.fiscal_document))
             .filter(RuleExecutionLog.tenant_id == tenant_id, RuleExecutionLog.passed == False)
             .all()
         )
 
         alerts = []
         for log in rule_logs:
-            fiscal_doc = (
-                db.query(FiscalDocument).filter_by(id=log.fiscal_document_id).first()
-            )
+            fiscal_doc = log.fiscal_document
             if not fiscal_doc:
                 continue
 

@@ -2,7 +2,9 @@
 Storage service for MinIO/S3 file management
 """
 import hashlib
+import tempfile
 from io import BytesIO
+from typing import AsyncIterator, Tuple
 from minio import Minio
 from minio.error import S3Error
 import logging
@@ -10,6 +12,9 @@ import logging
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# 8 MB chunks — MinIO multipart minimum is 5 MB; 8 MB balances memory vs round-trips
+_CHUNK_SIZE = 8 * 1024 * 1024
 
 
 class StorageServiceError(Exception):
@@ -43,6 +48,73 @@ class StorageService:
             logger.error(f"Failed to initialize MinIO client: {str(e)}")
             raise StorageServiceError(f"MinIO initialization failed: {str(e)}")
 
+    async def upload_stream(
+        self,
+        file_stream: AsyncIterator[bytes],
+        key: str,
+        content_type: str = "application/octet-stream",
+        max_size: int = 2 * 1024 * 1024 * 1024,
+    ) -> Tuple[str, str, int]:
+        """
+        Stream-upload a file to MinIO without loading it fully in RAM.
+
+        Reads the async iterator in 8 MB chunks, computing SHA-256 and total
+        size incrementally, then uploads via MinIO put_object using a
+        synchronous BytesIO pipe filled from a collected buffer.
+
+        Args:
+            file_stream: Async iterator yielding bytes (from UploadFile.stream())
+            key: Storage key
+            content_type: MIME type
+            max_size: Hard limit in bytes — raises StorageServiceError if exceeded
+
+        Returns:
+            (key, sha256_hex, total_bytes)
+
+        Raises:
+            StorageServiceError: If file exceeds max_size or upload fails
+        """
+        hasher = hashlib.sha256()
+        total_bytes = 0
+
+        # Spill to disk after 50 MB — avoids OOM on large SPED files while
+        # keeping small files fast (in-memory spool)
+        _SPOOL_THRESHOLD = 50 * 1024 * 1024
+
+        try:
+            with tempfile.SpooledTemporaryFile(max_size=_SPOOL_THRESHOLD) as spool:
+                async for chunk in file_stream:
+                    total_bytes += len(chunk)
+                    if total_bytes > max_size:
+                        raise StorageServiceError(
+                            f"File exceeds maximum size of {max_size} bytes"
+                        )
+                    hasher.update(chunk)
+                    spool.write(chunk)
+
+                file_hash = hasher.hexdigest()
+                spool.seek(0)
+
+                self.client.put_object(
+                    self.bucket,
+                    key,
+                    spool,
+                    length=total_bytes,
+                    content_type=content_type,
+                )
+
+            logger.info(f"Streamed upload {key} ({total_bytes} bytes) to {self.bucket}")
+            return key, file_hash, total_bytes
+
+        except StorageServiceError:
+            raise
+        except S3Error as e:
+            logger.error(f"Failed to upload {key}: {str(e)}")
+            raise StorageServiceError(f"Upload failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error uploading {key}: {str(e)}")
+            raise StorageServiceError(f"Unexpected error during upload: {str(e)}")
+
     def upload(
         self,
         content: bytes,
@@ -50,25 +122,13 @@ class StorageService:
         content_type: str = "application/octet-stream",
     ) -> str:
         """
-        Upload file to MinIO.
+        Upload file bytes to MinIO (synchronous, for small/known-size content).
 
-        Args:
-            content: File content (bytes)
-            key: Storage key (e.g., tenant_id/document_type/file_hash.ext)
-            content_type: MIME type
-
-        Returns:
-            Storage key (same as input key)
-
-        Raises:
-            StorageServiceError: If upload fails
+        For files larger than a few MB, prefer upload_stream() to avoid
+        loading the entire file in RAM.
         """
         try:
-            # Create BytesIO object from content
             file_obj = BytesIO(content)
-            file_obj.seek(0)
-
-            # Upload to MinIO
             self.client.put_object(
                 self.bucket,
                 key,
@@ -76,7 +136,6 @@ class StorageService:
                 length=len(content),
                 content_type=content_type,
             )
-
             logger.info(f"Uploaded {key} to {self.bucket}")
             return key
 

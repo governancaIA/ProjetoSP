@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str = "fiscalai-documents"
     MINIO_USE_SSL: bool = False
 
+    @field_validator("MINIO_ENDPOINT", mode="before")
+    @classmethod
+    def strip_minio_scheme(cls, v: str) -> str:
+        import warnings
+        for prefix in ("https://", "http://"):
+            if v.startswith(prefix):
+                stripped = v[len(prefix):]
+                warnings.warn(
+                    f"MINIO_ENDPOINT contained URL scheme '{prefix}' — stripped to '{stripped}'. "
+                    "MinIO SDK expects host:port or hostname only.",
+                    stacklevel=2,
+                )
+                return stripped
+        return v
+
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"

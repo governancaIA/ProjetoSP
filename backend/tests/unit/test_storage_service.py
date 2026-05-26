@@ -1,6 +1,7 @@
 """
 Tests for StorageService (MinIO abstraction)
 """
+import hashlib
 import pytest
 from unittest.mock import MagicMock, patch
 from io import BytesIO
@@ -150,3 +151,124 @@ def test_exists_not_found(storage_service):
     with patch("app.services.storage_service.S3Error", FakeS3Error):
         storage_service.client.stat_object.side_effect = FakeS3Error("NoSuchKey")
         assert storage_service.exists("nonexistent/key") is False
+
+
+# upload_stream tests
+
+async def _async_chunks(data: bytes, chunk_size: int = 1024):
+    """Helper: yield data in chunks as async iterator"""
+    for i in range(0, len(data), chunk_size):
+        yield data[i:i + chunk_size]
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_success(storage_service):
+    """upload_stream computes hash and size without loading full file in RAM"""
+    content = b"chunk1_data" * 500  # ~5.4 KB
+    expected_hash = hashlib.sha256(content).hexdigest()
+    storage_service.client.put_object.return_value = None
+
+    key, file_hash, file_size = await storage_service.upload_stream(
+        file_stream=_async_chunks(content, chunk_size=1024),
+        key="org/test/file.txt",
+        content_type="text/plain",
+    )
+
+    assert file_hash == expected_hash
+    assert file_size == len(content)
+    assert key == "org/test/file.txt"
+    storage_service.client.put_object.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_exceeds_max_size(storage_service):
+    """upload_stream raises StorageServiceError when file exceeds max_size"""
+    content = b"x" * 1000
+
+    with pytest.raises(StorageServiceError, match="exceeds maximum size"):
+        await storage_service.upload_stream(
+            file_stream=_async_chunks(content, chunk_size=100),
+            key="org/test/big.txt",
+            content_type="text/plain",
+            max_size=500,  # smaller than content
+        )
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_empty_file(storage_service):
+    """upload_stream handles empty file gracefully"""
+    storage_service.client.put_object.return_value = None
+
+    async def empty():
+        return
+        yield  # make it an async generator
+
+    key, file_hash, file_size = await storage_service.upload_stream(
+        file_stream=empty(),
+        key="org/test/empty.txt",
+        content_type="text/plain",
+    )
+
+    assert file_size == 0
+    assert len(file_hash) == 64  # valid SHA-256 hex
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_uses_spooled_temp_file(storage_service):
+    """upload_stream must NOT pass a BytesIO to put_object — must use SpooledTemporaryFile"""
+    import tempfile
+    content = b"fiscal_data" * 200
+    storage_service.client.put_object.return_value = None
+
+    await storage_service.upload_stream(
+        file_stream=_async_chunks(content, chunk_size=512),
+        key="org/test/spooled.txt",
+        content_type="text/plain",
+    )
+
+    call_args = storage_service.client.put_object.call_args
+    stream_arg = call_args[0][2]  # positional: bucket, key, stream, ...
+    assert not isinstance(stream_arg, BytesIO), (
+        "upload_stream must not accumulate chunks in BytesIO"
+    )
+    assert isinstance(stream_arg, tempfile.SpooledTemporaryFile), (
+        "upload_stream must use SpooledTemporaryFile to avoid RAM accumulation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_correct_length_passed(storage_service):
+    """put_object must receive exact byte count as length= keyword argument"""
+    content = b"x" * 4096
+    storage_service.client.put_object.return_value = None
+
+    _, _, size = await storage_service.upload_stream(
+        file_stream=_async_chunks(content, chunk_size=256),
+        key="org/test/length_check.txt",
+        content_type="text/plain",
+    )
+
+    call_kwargs = storage_service.client.put_object.call_args[1]
+    assert call_kwargs.get("length") == len(content) == size
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_s3_error_propagates(storage_service):
+    """S3Error from put_object must be wrapped as StorageServiceError"""
+    from app.services.storage_service import S3Error
+
+    class FakeS3Error(S3Error):
+        def __init__(self):
+            self.code = "InternalError"
+            self.message = "connection reset"
+        def __str__(self):
+            return self.message
+
+    storage_service.client.put_object.side_effect = FakeS3Error()
+
+    with pytest.raises(StorageServiceError, match="Upload failed"):
+        await storage_service.upload_stream(
+            file_stream=_async_chunks(b"data", chunk_size=4),
+            key="org/test/fail.txt",
+            content_type="text/plain",
+        )

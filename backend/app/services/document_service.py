@@ -139,7 +139,7 @@ class DocumentService:
                     valor_pis=Decimal(str(c100.get("valor_pis", 0))),
                     valor_cofins=Decimal(str(c100.get("valor_cofins", 0))),
                     valor_ipi=Decimal(str(c100.get("valor_ipi", 0))),
-                    status_nfe="autorizado",  # SPED registra documentos autorizados
+                    status_nfe="cancelado" if c100.get("cancelado") else "autorizado",
                     document_version=1,
                 )
                 db.add(fiscal_doc)

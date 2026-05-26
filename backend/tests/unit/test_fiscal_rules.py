@@ -167,9 +167,10 @@ def test_nfe_cancelada_no_sped_nao_informado(mock_fiscal_document, mock_item, te
 
 # SaidaSemLancamentoRule Tests
 
-def test_saida_sem_lancamento_saida(mock_fiscal_document, mock_item, test_config):
-    """Test outgoing invoice is conforme"""
-    mock_fiscal_document.natureza = "saída"
+def test_saida_sem_lancamento_saida_cfop_correto(mock_fiscal_document, mock_item, test_config):
+    """Saída com CFOP 5xxx — conforme"""
+    mock_fiscal_document.natureza = "saida"
+    mock_item.cfop = "5101"
 
     rule = SaidaSemLancamentoRule()
     result = rule.execute(mock_fiscal_document, [mock_item], test_config)
@@ -177,9 +178,23 @@ def test_saida_sem_lancamento_saida(mock_fiscal_document, mock_item, test_config
     assert result.passed is True
 
 
-def test_saida_sem_lancamento_entrada(mock_fiscal_document, mock_item, test_config):
-    """Test incoming invoice is conforme (not checked)"""
+def test_saida_sem_lancamento_saida_cfop_errado(mock_fiscal_document, mock_item, test_config):
+    """Saída com CFOP 1xxx (entrada) — inconsistência CRÍTICA"""
+    mock_fiscal_document.natureza = "saida"
+    mock_item.cfop = "1101"
+
+    rule = SaidaSemLancamentoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], test_config)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.CRITICAL
+    assert "1101" in result.message
+
+
+def test_saida_sem_lancamento_entrada_cfop_correto(mock_fiscal_document, mock_item, test_config):
+    """Entrada com CFOP 1xxx — conforme"""
     mock_fiscal_document.natureza = "entrada"
+    mock_item.cfop = "1101"
 
     rule = SaidaSemLancamentoRule()
     result = rule.execute(mock_fiscal_document, [mock_item], test_config)
@@ -187,9 +202,42 @@ def test_saida_sem_lancamento_entrada(mock_fiscal_document, mock_item, test_conf
     assert result.passed is True
 
 
-def test_saida_sem_lancamento_case_insensitive(mock_fiscal_document, mock_item, test_config):
-    """Test rule is case-insensitive for natureza"""
-    mock_fiscal_document.natureza = "SAÍDA"
+def test_saida_sem_lancamento_entrada_cfop_errado(mock_fiscal_document, mock_item, test_config):
+    """Entrada com CFOP 5xxx (saída) — WARNING"""
+    mock_fiscal_document.natureza = "entrada"
+    mock_item.cfop = "5101"
+
+    rule = SaidaSemLancamentoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], test_config)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.WARNING
+
+
+def test_saida_sem_lancamento_sem_natureza(mock_fiscal_document, mock_item, test_config):
+    """Sem natureza — regra não aplicável, passa"""
+    mock_fiscal_document.natureza = None
+
+    rule = SaidaSemLancamentoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], test_config)
+
+    assert result.passed is True
+
+
+def test_saida_sem_lancamento_sem_itens(mock_fiscal_document, test_config):
+    """Sem itens — regra não aplicável, passa"""
+    mock_fiscal_document.natureza = "saida"
+
+    rule = SaidaSemLancamentoRule()
+    result = rule.execute(mock_fiscal_document, [], test_config)
+
+    assert result.passed is True
+
+
+def test_saida_sem_lancamento_exportacao_conforme(mock_fiscal_document, mock_item, test_config):
+    """Saída para exportação com CFOP 7xxx — conforme"""
+    mock_fiscal_document.natureza = "saida"
+    mock_item.cfop = "7101"
 
     rule = SaidaSemLancamentoRule()
     result = rule.execute(mock_fiscal_document, [mock_item], test_config)
@@ -307,17 +355,43 @@ def test_cst_incompativel_valido(mock_fiscal_document, mock_item, test_config):
 
 
 def test_cst_incompativel_multiplos_validos(mock_fiscal_document, test_config):
-    """Test multiple valid CST codes"""
+    """Test multiple valid CST ICMS codes (tabela A)"""
     item1 = MagicMock()
-    item1.cst = "01"
+    item1.cst = "40"  # Isenta (tabela A)
 
     item2 = MagicMock()
-    item2.cst = "07"
+    item2.cst = "90"  # Outras (tabela A)
 
     rule = CstIncompatiavelRule()
     result = rule.execute(mock_fiscal_document, [item1, item2], test_config)
 
     assert result.passed is True
+
+
+def test_cst_incompativel_tabela_b_simples(mock_fiscal_document, mock_item, test_config):
+    """CST 101/500 (Simples Nacional, tabela B) são válidos"""
+    item1 = MagicMock()
+    item1.cst = "101"  # Tributada Simples com crédito
+
+    item2 = MagicMock()
+    item2.cst = "500"  # ICMS cobrado por ST (tabela B)
+
+    rule = CstIncompatiavelRule()
+    result = rule.execute(mock_fiscal_document, [item1, item2], test_config)
+
+    assert result.passed is True
+
+
+def test_cst_incompativel_cst_pis_cofins_invalido_para_icms(mock_fiscal_document, mock_item, test_config):
+    """CSTs de PIS/COFINS (01-09) não existem na tabela ICMS — devem ser flagados"""
+    mock_item.cst = "07"  # Válido em PIS/COFINS, inexistente em ICMS
+
+    rule = CstIncompatiavelRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], test_config)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.WARNING
+    assert "07" in result.message
 
 
 def test_cst_incompativel_invalido(mock_fiscal_document, mock_item, test_config):
@@ -408,6 +482,198 @@ def test_cfop_invalido_sem_itens(mock_fiscal_document, test_config):
     result = rule.execute(mock_fiscal_document, [], test_config)
 
     assert result.passed is True
+
+
+# CfopInvalidoRule v2.0 — com tabela de referência ADE COTEPE
+
+@pytest.fixture
+def config_com_cfops():
+    """Config com tabela de referência CFOP disponível"""
+    return {
+        "tolerance_brl": 0.01,
+        "valid_cfops": {"5101", "5102", "5401", "6101", "6102", "1101", "1102", "2101", "3101"},
+        "cfop_metadata": {
+            "5101": {"tipo_operacao": "saida", "escopo": "intraestadual", "permite_devolucao": False},
+            "5102": {"tipo_operacao": "saida", "escopo": "intraestadual", "permite_devolucao": False},
+            "5401": {"tipo_operacao": "saida", "escopo": "intraestadual", "permite_devolucao": False},
+            "6101": {"tipo_operacao": "saida", "escopo": "interestadual", "permite_devolucao": False},
+            "6102": {"tipo_operacao": "saida", "escopo": "interestadual", "permite_devolucao": False},
+            "1101": {"tipo_operacao": "entrada", "escopo": "intraestadual", "permite_devolucao": False},
+            "1102": {"tipo_operacao": "entrada", "escopo": "intraestadual", "permite_devolucao": False},
+            "2101": {"tipo_operacao": "entrada", "escopo": "interestadual", "permite_devolucao": False},
+            "3101": {"tipo_operacao": "entrada", "escopo": "exterior", "permite_devolucao": False},
+        },
+    }
+
+
+def test_cfop_invalido_nivel2_cfop_inexistente_critical(mock_fiscal_document, mock_item, config_com_cfops):
+    """CFOP 9999 não existe na tabela ADE COTEPE — CRITICAL"""
+    mock_item.cfop = "9999"
+
+    rule = CfopInvalidoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config_com_cfops)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.CRITICAL
+    assert "9999" in result.message
+    assert "ADE COTEPE" in result.message
+
+
+def test_cfop_invalido_nivel2_saida_com_cfop_entrada_warning(mock_fiscal_document, mock_item, config_com_cfops):
+    """Saída com CFOP 1101 (entrada) — incompatível — WARNING"""
+    mock_fiscal_document.natureza = "saída"
+    mock_item.cfop = "1101"
+
+    rule = CfopInvalidoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config_com_cfops)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.WARNING
+    assert "saída" in result.message or "natureza" in result.message
+
+
+def test_cfop_invalido_nivel2_entrada_com_cfop_saida_warning(mock_fiscal_document, mock_item, config_com_cfops):
+    """Entrada com CFOP 5101 (saída) — incompatível — WARNING"""
+    mock_fiscal_document.natureza = "entrada"
+    mock_item.cfop = "5101"
+
+    rule = CfopInvalidoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config_com_cfops)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.WARNING
+
+
+def test_cfop_invalido_nivel2_saida_cfop_saida_conforme(mock_fiscal_document, mock_item, config_com_cfops):
+    """Saída com CFOP 5101 e tabela disponível — conforme"""
+    mock_fiscal_document.natureza = "saída"
+    mock_item.cfop = "5101"
+
+    rule = CfopInvalidoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config_com_cfops)
+
+    assert result.passed is True
+    assert "nivel_2" in result.input_snapshot.get("validacao", "")
+
+
+def test_cfop_invalido_nivel2_entrada_cfop_entrada_conforme(mock_fiscal_document, mock_item, config_com_cfops):
+    """Entrada com CFOP 1101 e tabela disponível — conforme"""
+    mock_fiscal_document.natureza = "entrada"
+    mock_item.cfop = "1101"
+
+    rule = CfopInvalidoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config_com_cfops)
+
+    assert result.passed is True
+
+
+def test_cfop_invalido_nivel2_sem_natureza_conforme(mock_fiscal_document, mock_item, config_com_cfops):
+    """Sem natureza definida: CFOP existente na tabela — conforme (sem validação de direção)"""
+    mock_fiscal_document.natureza = None
+    mock_item.cfop = "5101"
+
+    rule = CfopInvalidoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config_com_cfops)
+
+    assert result.passed is True
+
+
+def test_cfop_invalido_nivel1_sem_tabela_formato_errado(mock_fiscal_document, mock_item):
+    """Sem tabela de referência (nível 1): CFOP com formato errado — WARNING"""
+    mock_item.cfop = "ABC"
+    config = {"tolerance_brl": 0.01}  # sem valid_cfops
+
+    rule = CfopInvalidoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.WARNING
+
+
+def test_cfop_invalido_nivel1_sem_tabela_formato_valido(mock_fiscal_document, mock_item):
+    """Sem tabela de referência (nível 1): CFOP com formato válido — conforme (validação parcial)"""
+    mock_item.cfop = "5101"
+    config = {"tolerance_brl": 0.01}  # sem valid_cfops
+
+    rule = CfopInvalidoRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
+
+    assert result.passed is True
+    assert "parcial" in result.message.lower()
+
+
+# CstIncompatiavelRule v2.0 — regime-aware tests
+
+def test_cst_incompativel_lucro_real_tabela_a_valido(mock_fiscal_document, mock_item, test_config):
+    """Lucro Real com CST 00 (tabela A) — conforme"""
+    mock_item.cst = "00"
+    config = {**test_config, "regime_tributario": "lucro_real"}
+
+    rule = CstIncompatiavelRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
+
+    assert result.passed is True
+
+
+def test_cst_incompativel_lucro_real_tabela_b_invalido(mock_fiscal_document, mock_item, test_config):
+    """Lucro Real com CST 101 (Simples) — CRÍTICO: regime incompatível"""
+    mock_item.cst = "101"
+    config = {**test_config, "regime_tributario": "lucro_real"}
+
+    rule = CstIncompatiavelRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.CRITICAL
+    assert "101" in result.message
+
+
+def test_cst_incompativel_lucro_presumido_tabela_b_invalido(mock_fiscal_document, mock_item, test_config):
+    """Lucro Presumido com CST 500 (tabela B) — CRÍTICO"""
+    mock_item.cst = "500"
+    config = {**test_config, "regime_tributario": "lucro_presumido"}
+
+    rule = CstIncompatiavelRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.CRITICAL
+
+
+def test_cst_incompativel_simples_nacional_tabela_b_valido(mock_fiscal_document, mock_item, test_config):
+    """Simples Nacional com CST 102 (tabela B) — conforme"""
+    mock_item.cst = "102"
+    config = {**test_config, "regime_tributario": "simples_nacional"}
+
+    rule = CstIncompatiavelRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
+
+    assert result.passed is True
+
+
+def test_cst_incompativel_simples_nacional_tabela_a_invalido(mock_fiscal_document, mock_item, test_config):
+    """Simples Nacional com CST 00 (regime normal) — CRÍTICO: deve usar tabela B"""
+    mock_item.cst = "00"
+    config = {**test_config, "regime_tributario": "simples_nacional"}
+
+    rule = CstIncompatiavelRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.CRITICAL
+    assert "simples_nacional" in result.message
+
+
+def test_cst_incompativel_sem_regime_warning_apenas(mock_fiscal_document, mock_item, test_config):
+    """Sem regime configurado: CST inválido gera WARNING (não CRITICAL)"""
+    mock_item.cst = "99"
+    config = {**test_config, "regime_tributario": None}
+
+    rule = CstIncompatiavelRule()
+    result = rule.execute(mock_fiscal_document, [mock_item], config)
+
+    assert result.passed is False
+    assert result.severity == SeverityLevel.WARNING  # não CRITICAL sem regime
 
 
 # Integration: All rules registered and instantiable

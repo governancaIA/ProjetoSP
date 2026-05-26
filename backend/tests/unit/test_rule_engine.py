@@ -330,14 +330,35 @@ def test_rule_service_save_results(mock_fiscal_document):
 
 
 def test_rule_service_get_config_defaults():
-    """Test RuleService.get_config() returns defaults"""
+    """Test RuleService.get_config() returns defaults when no TenantConfig exists"""
     from app.services.rule_service import RuleService
 
     mock_db = MagicMock()
+    # Simulate no TenantConfig row for this tenant
+    mock_db.query.return_value.filter_by.return_value.first.return_value = None
+
     config = RuleService.get_config(mock_db, "org_001", "*")
 
     assert "tolerance_brl" in config
     assert config["tolerance_brl"] == 0.01
+    assert config["regime_tributario"] is None
+
+
+def test_rule_service_get_config_tenant_overrides():
+    """TenantConfig overrides are applied to the returned config"""
+    from app.services.rule_service import RuleService
+    from decimal import Decimal
+
+    mock_db = MagicMock()
+    tenant_cfg = MagicMock()
+    tenant_cfg.regime_tributario = "simples_nacional"
+    tenant_cfg.tolerance_brl = Decimal("0.05")
+    mock_db.query.return_value.filter_by.return_value.first.return_value = tenant_cfg
+
+    config = RuleService.get_config(mock_db, "org_001", "*")
+
+    assert config["regime_tributario"] == "simples_nacional"
+    assert config["tolerance_brl"] == 0.05
 
 
 # validate_document Task Tests
