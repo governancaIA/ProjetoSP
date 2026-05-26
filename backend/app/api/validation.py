@@ -6,8 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import Optional, List
 
-from app.core.database import get_db, set_tenant_schema
-from app.api.deps import get_current_user
+from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.services.scoring_service import ScoringService, AlertSeverity
 
@@ -119,11 +118,7 @@ async def get_period_score(
     - top_3_rules: most frequently failed rules
     - alerts_by_severity: count by severity level
     """
-    # Extract tenant_id from current user
     tenant_id = current_user.tenant_id
-
-    # Set tenant schema for query
-    set_tenant_schema(db, tenant_id)
 
     try:
         result = ScoringService.get_period_score(db, tenant_id, fiscal_year, fiscal_month)
@@ -243,11 +238,7 @@ async def get_priority_queue(
     Returns:
     - List of alerts with severity, exposure, and priority score
     """
-    # Extract tenant_id from current user
     tenant_id = current_user.tenant_id
-
-    # Set tenant schema for query
-    set_tenant_schema(db, tenant_id)
 
     try:
         alerts = ScoringService.get_alert_prioritization_queue(db, tenant_id, limit=limit)

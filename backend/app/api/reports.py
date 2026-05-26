@@ -5,8 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.services.report_service import generate_pdf_report, generate_excel_report
 

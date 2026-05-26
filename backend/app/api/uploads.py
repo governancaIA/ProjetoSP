@@ -8,8 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import logging
 
-from app.core.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.models.document import Document, DocumentType
 from app.services.storage_service import StorageService, StorageServiceError
@@ -32,6 +31,9 @@ MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
 
 # Storage quota per tenant per month: 10GB default
 STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024  # 10GB
+
+# Temporary key prefix used before hash is known; replaced after streaming
+_TEMP_PREFIX = "__tmp__"
 
 
 class UploadError(Exception):
@@ -87,7 +89,7 @@ async def upload_files(
         # Process each file
         for file in files:
             try:
-                # Validate MIME type
+                # Validate MIME type before touching the stream
                 if file.content_type not in ALLOWED_MIME_TYPES:
                     logger.warning(f"Invalid MIME type: {file.content_type} for {file.filename}")
                     results.append({
@@ -97,22 +99,8 @@ async def upload_files(
                     })
                     continue
 
-                # Read file content
-                content = await file.read()
-
-                # Validate file size
-                if len(content) > MAX_FILE_SIZE:
-                    logger.warning(f"File too large: {file.filename} ({len(content)} bytes)")
-                    results.append({
-                        "filename": file.filename,
-                        "status": "rejected",
-                        "reason": f"File size {len(content)} bytes exceeds 2GB limit"
-                    })
-                    continue
-
-                # Check storage quota
-                new_usage = current_usage + len(content)
-                if new_usage > STORAGE_QUOTA_BYTES:
+                # Check quota headroom before streaming (uses DB-tracked size, not actual content)
+                if current_usage >= STORAGE_QUOTA_BYTES:
                     logger.warning(f"Storage quota exceeded for {tenant_id}")
                     results.append({
                         "filename": file.filename,
@@ -121,18 +109,66 @@ async def upload_files(
                     })
                     continue
 
-                # Calculate SHA-256 checksum
-                file_hash = StorageService.calculate_file_hash(content)
-                logger.info(f"Calculated hash: {file_hash} for {file.filename}")
+                # Lazy init storage on first real upload
+                if storage is None:
+                    storage = StorageService()
 
-                # Check if file already uploaded (deduplication)
+                # Use a temporary key — we don't know the hash yet (computed during streaming)
+                ext = _get_file_extension(file.filename)
+                temp_key = f"{_TEMP_PREFIX}{tenant_id}/{file.filename}"
+
+                try:
+                    # Stream upload: hash and size computed incrementally, no full-file read
+                    # UploadFile.stream() returns an async iterator of bytes chunks
+                    _, file_hash, file_size = await storage.upload_stream(
+                        file_stream=file.stream(),
+                        key=temp_key,
+                        content_type=file.content_type,
+                        max_size=MAX_FILE_SIZE,
+                    )
+                except StorageServiceError as e:
+                    if "exceeds maximum size" in str(e):
+                        results.append({
+                            "filename": file.filename,
+                            "status": "rejected",
+                            "reason": f"File exceeds 2GB limit"
+                        })
+                    else:
+                        logger.error(f"Storage error for {file.filename}: {str(e)}")
+                        results.append({
+                            "filename": file.filename,
+                            "status": "error",
+                            "reason": f"Storage error: {str(e)}"
+                        })
+                    continue
+
+                # Check quota with actual size
+                new_usage = current_usage + file_size
+                if new_usage > STORAGE_QUOTA_BYTES:
+                    # Clean up the temp upload
+                    try:
+                        storage.delete(temp_key)
+                    except Exception:
+                        pass
+                    results.append({
+                        "filename": file.filename,
+                        "status": "rejected",
+                        "reason": f"Storage quota exceeded after upload ({file_size} bytes)"
+                    })
+                    continue
+
+                # Check for duplicate (hash known only after streaming)
                 existing_doc = db.query(Document).filter_by(
                     tenant_id=tenant_id,
-                    file_hash=file_hash
+                    file_hash=file_hash,
                 ).first()
 
                 if existing_doc:
-                    logger.info(f"File already uploaded: {file.filename} (hash: {file_hash})")
+                    logger.info(f"Duplicate detected: {file.filename} (hash: {file_hash})")
+                    try:
+                        storage.delete(temp_key)
+                    except Exception:
+                        pass
                     results.append({
                         "filename": file.filename,
                         "status": "duplicate",
@@ -141,42 +177,34 @@ async def upload_files(
                     })
                     continue
 
-                # Upload to MinIO (lazy init on first real upload)
-                if storage is None:
-                    storage = StorageService()
-
-                storage_key = StorageService.build_storage_key(
+                # Move temp key to final key (copy + delete, MinIO has no rename)
+                final_key = StorageService.build_storage_key(
                     tenant_id=tenant_id,
-                    document_type="unknown",  # Type detected during parsing
+                    document_type="unknown",
                     file_hash=file_hash,
-                    ext=_get_file_extension(file.filename)
+                    ext=ext,
                 )
-
                 try:
-                    uploaded_key = storage.upload(
-                        content=content,
-                        key=storage_key,
-                        content_type=file.content_type
+                    from minio.commonconfig import CopySource
+                    storage.client.copy_object(
+                        storage.bucket,
+                        final_key,
+                        CopySource(storage.bucket, temp_key),
                     )
-                    logger.info(f"Uploaded to MinIO: {uploaded_key}")
-                except StorageServiceError as e:
-                    logger.error(f"Storage error: {str(e)}")
-                    results.append({
-                        "filename": file.filename,
-                        "status": "error",
-                        "reason": f"Storage error: {str(e)}"
-                    })
-                    continue
+                    storage.delete(temp_key)
+                except Exception as e:
+                    logger.warning(f"Could not rename temp key, keeping as final: {str(e)}")
+                    final_key = temp_key  # fallback: use temp key as final
 
                 # Create Document record
                 doc = DocumentService.create_document_record(
                     db=db,
                     tenant_id=tenant_id,
                     original_filename=file.filename,
-                    document_type=DocumentType.UNKNOWN,  # Type detected during parsing
+                    document_type=DocumentType.UNKNOWN,
                     file_hash=file_hash,
-                    file_size=len(content),
-                    storage_key=storage_key,
+                    file_size=file_size,
+                    storage_key=final_key,
                     storage_bucket=storage.bucket,
                 )
 
@@ -184,10 +212,8 @@ async def upload_files(
                 task = parse_document.delay(doc.id, tenant_id)
                 logger.info(f"Enqueued parse_document task: {task.id} for document {doc.id}")
 
-                # Save task_id for job status polling
                 doc.celery_task_id = task.id
                 db.commit()
-                logger.info(f"Created Document record: id={doc.id}")
 
                 results.append({
                     "filename": file.filename,
@@ -195,11 +221,10 @@ async def upload_files(
                     "document_id": doc.id,
                     "job_id": task.id,
                     "file_hash": file_hash,
-                    "file_size": len(content),
+                    "file_size": file_size,
                     "message": "File uploaded and queued for processing"
                 })
 
-                # Update current usage
                 current_usage = new_usage
 
             except Exception as e:

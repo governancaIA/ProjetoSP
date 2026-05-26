@@ -6,8 +6,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.services.auth_service import AuthService
 from app.schemas.auth import (
@@ -25,7 +24,8 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: Session = Depends(get_db)) -> User:
+@limiter.limit("3/minute")
+async def register(request: Request, register_request: RegisterRequest, db: Session = Depends(get_db)) -> User:
     """
     Register a new user
 
@@ -40,7 +40,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)) -> U
         HTTPException: If email already exists
     """
     try:
-        user = AuthService.register(db, request)
+        user = AuthService.register(db, register_request)
         return user
     except ValueError as e:
         raise HTTPException(
@@ -153,7 +153,7 @@ async def complete_onboarding(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return OnboardingStatusResponse(
-        completed=cfg.onboarding_completed == "1",
+        completed=bool(cfg.onboarding_completed),
         regime_tributario=cfg.regime_tributario,
     )
 
@@ -168,6 +168,6 @@ async def get_onboarding_status(
     if cfg is None:
         return OnboardingStatusResponse(completed=False, regime_tributario=None)
     return OnboardingStatusResponse(
-        completed=cfg.onboarding_completed == "1",
+        completed=bool(cfg.onboarding_completed),
         regime_tributario=cfg.regime_tributario,
     )

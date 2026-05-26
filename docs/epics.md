@@ -423,3 +423,195 @@
 
 **Ordem lógica de dependências:**
 `EPIC 7 → EPIC 8 → EPIC 1 → EPIC 2 → EPIC 4 → EPIC 5 → EPIC 6 → EPIC 3 → EPIC 10 → EPIC 12 → EPIC 9 → EPIC 11`
+
+---
+
+---
+
+## EPICS DE MELHORIA ARQUITETURAL
+
+> Geradas a partir da revisão arquitetural de 2026-05-25.
+> Devem ser executadas em paralelo às epics de produto, priorizadas por severidade.
+> Pré-requisito: correções críticas (EPIC 13) devem ser concluídas antes de qualquer deploy para clientes reais.
+
+---
+
+### EPIC 13: Correções de Segurança e LGPD Críticas ✅ CONCLUÍDA (2026-05-26)
+
+**Objetivo:** Eliminar vulnerabilidades que podem causar violação de dados fiscal (LGPD Art. 46) ou comprometimento total da autenticação antes do primeiro cliente real.
+
+**Escopo técnico:**
+- [x] Sanitizar `tenant_id` antes de interpolação em `SET search_path` — `core/database.py`
+  - AC: regex `^[a-zA-Z0-9_-]{3,100}$` aplicada; qualquer valor fora do padrão levanta `ValueError` com log de segurança ✅
+- [x] Validar `SECRET_KEY` no startup da aplicação — `main.py` lifespan
+  - AC: se `SECRET_KEY` for o valor default e `DEBUG=False`, aplicação não sobe; warning em modo dev ✅
+- [x] Criar função `mask_chave_acesso()` e aplicar em todos os logs e `RuleExecutionLog.message`
+  - AC: CNPJ (posições 6–19 da chave de 44 dígitos) mascarado como `***`; aplicado em 3 regras fiscais ✅
+- [x] Restringir `CORS_ORIGINS` — nunca `"*"` com `allow_credentials=True` em produção
+  - AC: `model_validator` em `core/config.py` rejeita combinação insegura em produção ✅
+- [x] Rate limiting em `/api/v1/auth/login` com `slowapi`
+  - AC: máx. 5 tentativas por IP por minuto; resposta 429 com `Retry-After` ✅
+- [x] Rate limiting em `/api/v1/auth/register` — adicionado na revisão pós-review
+  - AC: máx. 3 tentativas por IP por minuto ✅
+- [x] Email não vaza em mensagem de erro de registro — LGPD
+  - AC: mensagem genérica "Email já cadastrado" sem expor o endereço ✅
+
+**Commits:** `3d0cf25` (AC1,2,4,5), `2dfd243` (AC3 mask_chave_acesso), `fix-review` (AC rate limit /register + email LGPD)
+
+---
+
+### EPIC 14: Fundação Multi-Tenancy Completa ✅ CONCLUÍDA (2026-05-26)
+
+**Objetivo:** Completar o que está parcialmente implementado no Epic 7 — sem isso, novos tenants não têm schema e dados podem vazar entre tenants em produção.
+
+**Escopo técnico:**
+- [x] Endpoint de signup cria schema PostgreSQL atomicamente junto com o usuário
+  - AC: `POST /api/v1/auth/register` chama `create_tenant_schema(tenant_id)` com compensating transaction ✅
+- [x] Middleware FastAPI que seta `search_path` em cada request autenticado
+  - AC: `TenantMiddleware` extrai `tenant_id` do JWT sem DB lookup; `get_db()` em `api/deps.py` executa `SET search_path` na sessão entregue aos handlers; todos os routers usam `get_db` de `deps.py` ✅
+- [x] Substituir `NullPool` por `QueuePool` com limites explícitos
+  - AC: `pool_size=10`, `max_overflow=20`, `pool_pre_ping=True` ✅
+- [x] Modelo `TenantConfig` no schema `public` com regime tributário, CNPJ principal, UF, tolerâncias
+  - AC: migration `002_tenant_config.py`; `RuleService.get_config()` consome `TenantConfig` ✅
+- [x] Wizard de onboarding: validar CNPJ + salvar `TenantConfig`
+  - AC: `validate_cnpj()` em `core/validators.py` (algoritmo oficial de dígitos verificadores); `POST /auth/onboarding` idempotente; `GET /auth/onboarding/status` ✅
+
+**Commits:** `5bcaada` (implementação principal), fixes de review (middleware bug, onboarding_completed Boolean)
+
+**Arquivos afetados:** `core/database.py`, `core/middleware.py` (novo), `core/validators.py` (novo), `api/auth.py`, `api/deps.py`, `models/tenant_config.py`, `services/auth_service.py`, `schemas/auth.py`
+
+**Estimativa:** M (1 semana)
+
+**Prioridade:** Alto — executa logo após EPIC 13
+
+---
+
+### EPIC 15: Completude do Parser SPED e Cruzamento SPED × XML
+
+**Objetivo:** Corrigir gaps no parser que fazem regras fiscais críticas nunca dispararem — especialmente cancelamentos e divergências entre SPED e XML da SEFAZ.
+
+**Escopo técnico:**
+- [ ] Extração de eventos de cancelamento do registro C110 (bloco C) e atualização de `status_nfe`
+  - AC: `cod_inf = "cancelamento"` (evento 110111) detectado; `FiscalDocument.status_nfe` atualizado para `"cancelado"`; regra `nfe_cancelada_no_sped` passa a disparar
+- [ ] Detecção de encoding automática antes do decode (`chardet`) — `parsers/sped_efd_icms.py`
+  - AC: arquivos Latin-1/ISO-8859-1 (pre-2015) parseados corretamente; sem perda silenciosa de valores monetários
+- [ ] Validação do layout C100 contra versão do arquivo (registro `0000`)
+  - AC: versão extraída do `0000`; mapeamento de campos selecionado por versão; warning se versão desconhecida
+- [ ] Parser de EFD Contribuições: registros M100, M200, M400, M500
+  - AC: PIS/COFINS por CST extraídos; modelo `EFDContribuicoes` persistido; regra `cst_incompativel` passa a ter dados reais
+- [ ] Implementação real da regra `saida_sem_lancamento` via cruzamento SPED × XML por `chave_acesso`
+  - AC: NF-e autorizada (origem XML) sem C100 correspondente (origem SPED) no mesmo período gera alerta ALTO; regra marcada como `status = "1.0.0"` (removendo sufixo `-stub`)
+
+**Arquivos afetados:** `parsers/sped_efd_icms.py`, `parsers/nfe_xml.py`, `validators/rules/fiscal_rules.py`, `models/fiscal_document.py`
+
+**Estimativa:** G (2 semanas)
+
+**Prioridade:** Alto — sem isso, MVP tem falsos negativos em regras core
+
+---
+
+### EPIC 16: Tabelas de Referência Fiscal no Banco
+
+**Objetivo:** Mover dados de referência fiscal (CFOPs, CSTs, TIPI/NCM) de listas hardcoded no Python para tabelas versionadas no PostgreSQL schema `public` — permitindo atualização sem deploy.
+
+**Escopo técnico:**
+- [ ] Tabela `cfop_reference` com todos os CFOPs válidos, descrição, tipo (entrada/saída), indicador inter/intraestadual
+  - AC: migration Alembic com dados completos (fonte: ADE COTEPE vigente); regra `cfop_invalido` refatorada para consultar tabela
+- [ ] Tabela `cst_icms_reference` com CSTs válidos por regime tributário
+  - AC: colunas `regime_lucro_real`, `regime_lucro_presumido`, `regime_simples`; regra `cst_incompativel` usa `TenantConfig.regime_tributario` para filtrar CSTs válidos
+- [ ] Tabela `tipi_ncm` com alíquotas IPI por NCM (fonte: Receita Federal)
+  - AC: migration inicial com tabela TIPI vigente; regra IPI implementada contra essa tabela
+- [ ] Tabela `ibge_uf` com códigos de UF para validação de chave de acesso
+  - AC: 27 UFs + DF; usado na validação de `cfop_invalido` (inter vs intraestadual)
+- [ ] Endpoint admin `POST /api/v1/admin/reference-data/reload` para recarregar tabelas sem deploy
+  - AC: aceita upload de arquivo CSV/JSON; versão anterior preservada com `valid_until`; somente role `admin`
+
+**Arquivos afetados:** `models/` (novos modelos de referência), `migrations/versions/` (novas migrations), `validators/rules/fiscal_rules.py`
+
+**Estimativa:** M (1 semana)
+
+**Prioridade:** Médio — necessário para completar Epic 2 e viabilizar Epic 12
+
+---
+
+### EPIC 17: Performance e Escalabilidade do Pipeline
+
+**Objetivo:** Eliminar gargalos que causam crash ou timeouts em produção com volume real de dados fiscais.
+
+**Escopo técnico:**
+- [ ] Streaming upload para MinIO com hash SHA-256 calculado em chunks — `api/uploads.py`, `services/storage_service.py`
+  - AC: arquivos de até 2GB processados sem carregar em RAM; hash calculado durante o stream; multipart upload para MinIO
+- [ ] Refatorar `get_period_score` para query SQL agregada — `services/scoring_service.py`
+  - AC: substituir loop Python + N queries por 1 query com JOINs e GROUP BY; p95 < 500ms para períodos com 1.000 NFs
+- [ ] Paginação real via SQL em `get_alert_prioritization_queue`
+  - AC: `OFFSET/LIMIT` na query; nunca carrega todos os logs em memória; cursor-based pagination para >10k registros
+- [ ] Filas Celery separadas por tipo de trabalho
+  - AC: `queue_parse` (I/O intensivo, 4 workers), `queue_validate` (CPU, 2 workers), `queue_scoring` (lazy); upload massivo de um tenant não bloqueia outros
+- [ ] Cache Redis para scores de períodos fechados
+  - AC: TTL de 15 minutos; invalidado automaticamente após novo processamento de arquivo do período; hit rate > 80% em produção
+
+**Arquivos afetados:** `api/uploads.py`, `services/storage_service.py`, `services/scoring_service.py`, `core/celery_app.py`, `tasks/validate_document.py`
+
+**Estimativa:** M (1 semana)
+
+**Prioridade:** Alto — streaming upload é bloqueador de produção; N+1 causa timeout em escala
+
+---
+
+### EPIC 18: Observabilidade e Health Check Real
+
+**Objetivo:** Dar visibilidade real ao estado da aplicação — sem isso, o load balancer pensa que tudo está saudável mesmo com banco fora, e incidentes ficam invisíveis.
+
+**Escopo técnico:**
+- [ ] Health check com verificação real de dependências — `main.py`
+  - AC: `GET /health` verifica PostgreSQL (query `SELECT 1`), Redis (PING), MinIO (listagem de bucket); retorna `"healthy"` ou `"degraded"` com detalhe por componente
+- [ ] Endpoint de reprocessamento retroativo por tenant — `api/` (novo endpoint admin)
+  - AC: `POST /api/v1/admin/tenants/{tenant_id}/revalidate` aceita `from_date` e `rule_ids`; dispara revalidação em background via Celery; status consultável via `job_id`
+- [ ] Logs estruturados JSON com campos padronizados (sem PII)
+  - AC: todos os logs em formato JSON com `tenant_id` (mascarado), `document_id`, `rule_id`, `severity`, `duration_ms`; sem `chave_acesso` ou CNPJ em texto plano
+- [ ] Métricas Prometheus básicas: latência por endpoint, profundidade de fila Celery, taxa de erro por regra
+  - AC: endpoint `/metrics` exposto; alertas configurados para p95 > 2s e fila > 100 jobs
+
+**Arquivos afetados:** `main.py`, `api/` (novo router admin), `core/` (logging config)
+
+**Estimativa:** P (3–4 dias)
+
+**Prioridade:** Médio — necessário antes de ir para produção com clientes reais
+
+---
+
+### EPIC 19: Reordenação e Completude do Sequenciamento de Epics
+
+**Objetivo:** Garantir que a ordem de execução das epics respeite as dependências reais descobertas na revisão arquitetural.
+
+**Sequenciamento corrigido:**
+
+```
+EPIC 13 (Segurança crítica)
+    ↓
+EPIC 14 (Multi-tenancy completo)
+    ↓
+EPIC 15 (Parser + cruzamento SPED×XML) ←→ EPIC 16 (Tabelas de referência)
+    ↓
+EPIC 17 (Performance) ←→ EPIC 18 (Observabilidade)
+    ↓
+EPIC 1 (Completude de ingestão) → EPIC 2 (Motor de regras completo)
+    ↓
+EPIC 4 (Scoring) → EPIC 5 (Dashboard) → EPIC 6 (Relatórios)
+    ↓
+EPIC 3 (IA — só faz sentido com ≥3 meses de dados por tenant)
+    ↓
+EPIC 8 (Pipeline escala) → EPIC 10 (Segurança enterprise) → EPIC 12 (Legislação auto)
+    ↓
+EPIC 9 (API pública) → EPIC 11 (Monetização)
+```
+
+**Marcos de validação:**
+- [x] **Marco 1 — Fundação segura:** EPICs 13 + 14 concluídas (2026-05-26). Critério: novo tenant criado via API tem schema isolado; nenhum CNPJ em logs; JWT seguro em produção. ✅
+- [ ] **Marco 2 — Regras corretas:** EPICs 15 + 16 concluídas. Critério: `nfe_cancelada_no_sped` dispara em fixture real; `saida_sem_lancamento` detecta NF sem C100; CFOPs validados contra tabela.
+- [ ] **Marco 3 — Produção estável:** EPICs 17 + 18 concluídas. Critério: upload de 500MB sem OOM; p95 `get_period_score` < 500ms; health check detecta banco fora.
+- [ ] **Marco 4 — MVP real:** EPICs de produto 1–6 com escopo completo. Critério: 3 empresas beta com inconsistências reais detectadas e confirmadas.
+
+**Estimativa:** Sem esforço próprio — é um documento de sequenciamento. Custo está nas epics individuais.
+
+**Prioridade:** Referência — consultar antes de iniciar qualquer epic

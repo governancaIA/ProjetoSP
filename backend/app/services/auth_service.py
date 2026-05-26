@@ -40,7 +40,7 @@ class AuthService:
         # Check if user already exists
         existing_user = db.query(User).filter(User.email == request.email).first()
         if existing_user:
-            raise ValueError(f"Email {request.email} already registered")
+            raise ValueError("Email já cadastrado")
 
         # Create new user
         user = User(
@@ -232,7 +232,7 @@ class AuthService:
         cfg.razao_social = request.razao_social
         cfg.uf = request.uf.upper()
         cfg.regime_tributario = request.regime_tributario
-        cfg.onboarding_completed = "1"
+        cfg.onboarding_completed = True
 
         db.commit()
         db.refresh(cfg)

@@ -135,15 +135,30 @@ class TestJWTTokens:
         assert "iat" in payload
 
     def test_verify_access_token_missing_sub(self):
-        """Test that token without 'sub' claim is rejected"""
-        # This would require manually creating a token without 'sub',
-        # which is complex. Skipped for now as the service always includes it.
-        pass
+        """Token without 'sub' claim must be rejected with 401"""
+        from datetime import datetime, timezone, timedelta
+        from jose import jwt as jose_jwt
+        token = jose_jwt.encode(
+            {"tenant_id": "org_001", "exp": datetime.now(timezone.utc) + timedelta(minutes=15)},
+            settings.SECRET_KEY,
+            algorithm=settings.ALGORITHM,
+        )
+        with pytest.raises(Exception) as exc_info:
+            verify_access_token(token)
+        assert getattr(exc_info.value, "status_code", None) == 401
 
     def test_verify_access_token_missing_tenant_id(self):
-        """Test that token without 'tenant_id' claim is rejected"""
-        # Similar to above - would require manual token creation
-        pass
+        """Token without 'tenant_id' claim must be rejected with 401"""
+        from datetime import datetime, timezone, timedelta
+        from jose import jwt as jose_jwt
+        token = jose_jwt.encode(
+            {"sub": "1", "exp": datetime.now(timezone.utc) + timedelta(minutes=15)},
+            settings.SECRET_KEY,
+            algorithm=settings.ALGORITHM,
+        )
+        with pytest.raises(Exception) as exc_info:
+            verify_access_token(token)
+        assert getattr(exc_info.value, "status_code", None) == 401
 
 
 class TestMaskChaveAcesso:

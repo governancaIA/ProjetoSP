@@ -177,11 +177,11 @@ class TestAuthServiceOnboarding:
         db.query.return_value.filter_by.return_value.first.return_value = None
 
         cfg_mock = MagicMock()
-        cfg_mock.onboarding_completed = "1"
+        cfg_mock.onboarding_completed = True
         cfg_mock.regime_tributario = "lucro_real"
 
         def refresh_side_effect(obj):
-            obj.onboarding_completed = "1"
+            obj.onboarding_completed = True
             obj.regime_tributario = "lucro_real"
 
         db.refresh.side_effect = refresh_side_effect
@@ -189,7 +189,7 @@ class TestAuthServiceOnboarding:
         result = AuthService.complete_onboarding(db, "tenant_abc", self._make_request())
         db.add.assert_called_once()
         db.commit.assert_called_once()
-        assert result.onboarding_completed == "1"
+        assert result.onboarding_completed is True
 
     def test_complete_onboarding_invalid_cnpj_raises(self):
         from app.services.auth_service import AuthService
@@ -202,11 +202,11 @@ class TestAuthServiceOnboarding:
         from app.services.auth_service import AuthService
         from app.models.tenant_config import TenantConfig
         db = MagicMock()
-        existing = TenantConfig(tenant_id="tenant_abc", onboarding_completed="0")
+        existing = TenantConfig(tenant_id="tenant_abc", onboarding_completed=False)
         db.query.return_value.filter_by.return_value.first.return_value = existing
 
         def refresh_side_effect(obj):
-            obj.onboarding_completed = "1"
+            obj.onboarding_completed = True
             obj.regime_tributario = "lucro_presumido"
 
         db.refresh.side_effect = refresh_side_effect
@@ -215,7 +215,7 @@ class TestAuthServiceOnboarding:
         result = AuthService.complete_onboarding(db, "tenant_abc", req)
         # Should NOT call db.add (existing object updated in place)
         db.add.assert_not_called()
-        assert result.onboarding_completed == "1"
+        assert result.onboarding_completed is True
 
     def test_get_onboarding_status_none_when_missing(self):
         from app.services.auth_service import AuthService
@@ -230,7 +230,7 @@ class TestAuthServiceOnboarding:
         db = MagicMock()
         cfg = TenantConfig(
             tenant_id="tenant_abc",
-            onboarding_completed="1",
+            onboarding_completed=True,
             regime_tributario="simples_nacional",
         )
         db.query.return_value.filter_by.return_value.first.return_value = cfg
