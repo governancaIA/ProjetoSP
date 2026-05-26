@@ -42,9 +42,9 @@ export function DocumentsTable({ documents, loading }: DocumentsTableProps) {
       <TableBody>
         {documents.map((doc) => (
           <TableRow
-            key={doc.document_id}
+            key={doc.id}
             className="cursor-pointer hover:bg-slate-50"
-            onClick={() => doc.document_id && navigate(`/documents/${doc.document_id}`)}
+            onClick={() => navigate(`/documents/${doc.id}`)}
           >
             <TableCell className="font-mono text-xs">{truncateChave(doc.chave_acesso || '')}</TableCell>
             <TableCell>{doc.numero_nf}</TableCell>

@@ -54,10 +54,21 @@ class AuthService:
             db.add(user)
             db.commit()
             db.refresh(user)
-            return user
         except IntegrityError as e:
             db.rollback()
             raise ValueError(f"Failed to register user: {str(e)}")
+
+        # Create isolated PostgreSQL schema for this tenant (atomic with user creation)
+        try:
+            from app.core.database import create_tenant_schema
+            create_tenant_schema(request.tenant_id)
+        except Exception as e:
+            # Schema creation failure rolls back the user — keep DB consistent
+            db.delete(user)
+            db.commit()
+            raise ValueError(f"Failed to initialize tenant workspace: {str(e)}")
+
+        return user
 
     @staticmethod
     def authenticate(db: Session, email: str, password: str) -> User | None:

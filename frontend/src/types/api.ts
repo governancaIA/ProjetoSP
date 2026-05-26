@@ -134,12 +134,13 @@ export interface UploadResponse {
 // ── GET /api/v1/documents ─────────────────────────────────────────────────────
 
 export interface Document {
-  document_id?: number
+  id: number
   chave_acesso?: string
   numero_nf?: string
   emitente_nome?: string
   data_emissao?: string
   status_nfe?: 'autorizado' | 'cancelado' | 'denegado'
+  valor_total?: number
   document_score?: number
 }
 

@@ -291,9 +291,11 @@ class ScoringService:
         else:
             end_date = date(fiscal_year, fiscal_month + 1, 1)
 
-        # Fetch all fiscal documents in this period
+        # Single query with eager-loaded rule_logs — eliminates N+1
+        from sqlalchemy.orm import joinedload
         fiscal_docs = (
             db.query(FiscalDocument)
+            .options(joinedload(FiscalDocument.rule_logs))
             .filter(
                 FiscalDocument.tenant_id == tenant_id,
                 FiscalDocument.data_emissao >= start_date.replace(day=1),
@@ -312,7 +314,7 @@ class ScoringService:
                 "top_3_rules": [],
             }
 
-        # Aggregate scores
+        # Aggregate scores using pre-loaded rule_logs (no extra queries)
         total_exposure = Decimal("0.00")
         critical_documents = 0
         rule_failure_count = {}
@@ -324,27 +326,18 @@ class ScoringService:
         }
 
         for doc in fiscal_docs:
-            doc_score = ScoringService.get_document_score(db, doc.id)
-
-            # Accumulate exposure
-            total_exposure += Decimal(str(doc_score.get("total_exposure", 0)))
-
-            # Count critical documents
-            if doc_score.get("alerts_by_severity", {}).get("CRITICAL", 0) > 0:
-                critical_documents += 1
-
-            # Count rule failures
-            rule_logs = (
-                db.query(RuleExecutionLog)
-                .filter_by(fiscal_document_id=doc.id)
-                .all()
-            )
-            for log in rule_logs:
+            doc_has_critical = False
+            for log in doc.rule_logs:
                 if not log.passed:
                     rule_failure_count[log.rule_id] = rule_failure_count.get(log.rule_id, 0) + 1
-                    severity, _ = ScoringService.calculate_alert_severity(log, doc)
+                    severity, exposure = ScoringService.calculate_alert_severity(log, doc)
+                    total_exposure += exposure
+                    if severity == AlertSeverity.CRITICAL:
+                        doc_has_critical = True
                     if severity != AlertSeverity.INFORMATIVE:
                         all_alerts_by_severity[severity] = all_alerts_by_severity.get(severity, 0) + 1
+            if doc_has_critical:
+                critical_documents += 1
 
         # Calculate period score
         period_score = 100

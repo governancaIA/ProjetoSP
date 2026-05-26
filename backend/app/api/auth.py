@@ -1,7 +1,9 @@
 """
 Authentication endpoints (register, login, refresh, logout, me)
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -17,6 +19,7 @@ from app.schemas.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -45,7 +48,8 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)) -> U
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+@limiter.limit("5/minute")
+async def login(request: Request, login_request: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     """
     Login user with email and password
 
@@ -59,7 +63,7 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)) -> TokenRe
     Raises:
         HTTPException: If credentials are invalid
     """
-    token_response = AuthService.login(db, request)
+    token_response = AuthService.login(db, login_request)
     if not token_response:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

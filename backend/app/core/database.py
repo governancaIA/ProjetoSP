@@ -1,16 +1,27 @@
 """
 Database configuration and tenant routing
 """
-from sqlalchemy import create_engine, event, text
+import re
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
+# Tenant ID must be safe for schema name interpolation (PostgreSQL doesn't support
+# parameterized identifiers, so we validate strictly before interpolating).
+_TENANT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{3,100}$")
+
+def _validate_tenant_id(tenant_id: str) -> str:
+    """Raise ValueError if tenant_id is not safe for schema interpolation."""
+    if not _TENANT_ID_RE.match(tenant_id):
+        raise ValueError(f"Invalid tenant_id format: {tenant_id!r}")
+    return tenant_id
+
 # Create database engine
 engine = create_engine(
     settings.DATABASE_URL,
-    poolclass=NullPool,  # Disable pooling for better multi-tenant support
+    poolclass=NullPool,
     echo=settings.DEBUG,
 )
 
@@ -30,27 +41,22 @@ def get_db():
 
 def set_tenant_schema(session: Session, tenant_id: str) -> None:
     """
-    Set the current schema for a session (multi-tenancy support)
-
-    Args:
-        session: SQLAlchemy session
-        tenant_id: Organization/tenant identifier (e.g., "tenant_org_001")
+    Set the current schema for a session (multi-tenancy support).
+    tenant_id is validated against a strict regex before interpolation.
     """
+    _validate_tenant_id(tenant_id)
     schema_name = f"tenant_{tenant_id}"
-    # Execute SET search_path to switch to tenant schema
-    session.execute(text(f"SET search_path TO {schema_name}, public"))
+    session.execute(text(f'SET search_path TO "{schema_name}", public'))
     session.commit()
 
 def create_tenant_schema(tenant_id: str) -> None:
     """
-    Create a new schema for a tenant
-
-    Args:
-        tenant_id: Organization/tenant identifier
+    Create a new schema for a tenant.
+    tenant_id is validated against a strict regex before interpolation.
     """
+    _validate_tenant_id(tenant_id)
     schema_name = f"tenant_{tenant_id}"
     with engine.connect() as conn:
-        conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
-        # Create all tables in the new schema
+        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
         Base.metadata.create_all(bind=engine, schema=schema_name)
         conn.commit()

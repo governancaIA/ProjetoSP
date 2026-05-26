@@ -150,6 +150,41 @@ export const uploadFiles = (
     .then((r) => r.data)
 }
 
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+export const downloadReport = async (
+  year: number,
+  month: number,
+  format: 'pdf' | 'excel'
+): Promise<void> => {
+  const endpoint = `/reports/period/${year}/${month}/${format}`
+  const mimeType =
+    format === 'pdf'
+      ? 'application/pdf'
+      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  const ext = format === 'pdf' ? 'pdf' : 'xlsx'
+
+  const token = localStorage.getItem('fiscalai_token')
+  const response = await fetch(`/api/v1${endpoint}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail ?? `Erro ${response.status}`)
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(new Blob([blob], { type: mimeType }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `fiscalai-${year}-${String(month).padStart(2, '0')}.${ext}`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 // ── Job Status ────────────────────────────────────────────────────────────────
 
 export interface JobStatusResponse {
