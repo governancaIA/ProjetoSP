@@ -1,0 +1,40 @@
+name: Deploy to Production (VPS)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy via SSH
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script_stop: true   # aborta se qualquer comando falhar
+          script: |
+            set -e
+
+            echo "==> Atualizando código..."
+            cd /opt/fiscalai
+            git pull origin main
+
+            echo "==> Fazendo build e subindo serviços..."
+            cd infra
+            docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+
+            echo "==> Rodando migrations..."
+            docker compose -f docker-compose.prod.yml exec -T backend \
+              alembic upgrade head
+
+            echo "==> Status dos containers..."
+            docker compose -f docker-compose.prod.yml ps
+
+            echo "==> Deploy concluído com sucesso!"

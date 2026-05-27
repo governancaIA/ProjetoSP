@@ -98,7 +98,10 @@ services:
       dockerfile: Dockerfile
     container_name: fiscalai-flower
     command: celery -A app.tasks flower --port=5555
-    # Sem ports aqui — Caddy acessa internamente com autenticação básica
+    ports:
+      # Acessível apenas localmente — use SSH tunnel para acessar:
+      # ssh -L 5555:127.0.0.1:5555 root@89.116.214.246
+      - "127.0.0.1:5555:5555"
     env_file:
       - .env.prod
     depends_on:
@@ -148,7 +151,10 @@ services:
   minio:
     image: minio/minio:latest
     container_name: fiscalai-minio
-    # Sem ports aqui — Caddy acessa internamente (console protegido)
+    ports:
+      # Acessível apenas localmente — use SSH tunnel para acessar:
+      # ssh -L 9001:127.0.0.1:9001 root@89.116.214.246  → http://localhost:9001
+      - "127.0.0.1:9001:9001"
     env_file:
       - .env.prod
     volumes:
