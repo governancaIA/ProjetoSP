@@ -1,0 +1,53 @@
+# ============================================================
+#  FiscalAI — Caddyfile
+#
+#  Substitua SEU_DOMINIO.COM pelo domínio real apontado para
+#  o IP desta VPS (ex: fiscalai.com ou app.fiscalai.com).
+#
+#  Caddy obtém certificado SSL automaticamente via Let's Encrypt.
+#  Não é necessário instalar Certbot ou configurar SSL manualmente.
+# ============================================================
+
+SEU_DOMINIO.COM {
+
+    # ---- API Backend (FastAPI) ----
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    # ---- Frontend (React + nginx) ----
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # ---- Logs ----
+    log {
+        output file /data/logs/fiscalai-access.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+    }
+}
+
+# ---- MinIO Console (protegido por senha) ----
+# Acesse: https://storage.SEU_DOMINIO.COM
+# Requer registro DNS: storage.SEU_DOMINIO.COM → IP desta VPS
+storage.SEU_DOMINIO.COM {
+    basicauth {
+        # Gere o hash com: caddy hash-password --plaintext SUA_SENHA
+        # Substitua abaixo: admin <HASH_DA_SENHA>
+        admin $2a$14$placeholder_substitua_pelo_hash_real
+    }
+    reverse_proxy minio:9001
+}
+
+# ---- Flower (Celery Monitor — protegido por senha) ----
+# Acesse: https://flower.SEU_DOMINIO.COM
+# Requer registro DNS: flower.SEU_DOMINIO.COM → IP desta VPS
+flower.SEU_DOMINIO.COM {
+    basicauth {
+        # Mesmo hash gerado acima ou senha diferente
+        admin $2a$14$placeholder_substitua_pelo_hash_real
+    }
+    reverse_proxy flower:5555
+}

@@ -1,22 +1,45 @@
 version: '3.8'
 
+# ============================================================
+#  FiscalAI — Produção (VPS Ubuntu / Hostinger)
+#  Reverse proxy: Caddy (SSL automático via Let's Encrypt)
+#  Apenas as portas 80 e 443 ficam abertas ao host.
+#  Todos os outros serviços ficam na rede interna `fiscalai`.
+# ============================================================
+
 services:
-  # ===== FRONTEND (React + Vite) =====
+
+  # ===== CADDY (Reverse Proxy + SSL automático) =====
+  caddy:
+    image: caddy:2-alpine
+    container_name: fiscalai-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: always
+    networks:
+      - fiscalai
+    depends_on:
+      - frontend
+      - backend
+
+  # ===== FRONTEND (React → nginx) =====
   frontend:
     build:
       context: ../frontend
       dockerfile: Dockerfile.prod
     container_name: fiscalai-frontend
-    ports:
-      - "5173:5173"
-    environment:
-      - VITE_API_URL=https://adriner.fr/fiscalia/api/v1
-      - NODE_ENV=production
+    # Sem ports aqui — Caddy acessa internamente pela rede `fiscalai`
     restart: always
     networks:
       - fiscalai
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -30,23 +53,9 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     container_name: fiscalai-backend
-    ports:
-      - "8000:8000"
-    environment:
-      - ENV=production
-      - DEBUG=False
-      - DATABASE_URL=postgresql://fiscalai_user:FiscalAI#Postgres2026!@postgres:5432/fiscalai_db
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=FiscalAI#MinIO2026!@Secure
-      - MINIO_BUCKET=fiscalai-documents
-      - CORS_ORIGINS=https://adriner.fr,http://localhost:5173,http://localhost:8000
-      - SECRET_KEY=k8xAmP9xvQ2rL5xnJ4wH7cF3bG6yT1Z
-      - ALLOWED_HOSTS=adriner.fr,backend,localhost,127.0.0.1
-      - LOG_LEVEL=INFO
+    # Sem ports aqui — Caddy acessa internamente pela rede `fiscalai`
+    env_file:
+      - .env.prod
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,8 +72,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    volumes:
-      - ../backend:/app:ro
+    # REMOVIDO: ../backend:/app:ro — na VPS o código está dentro da imagem Docker
 
   # ===== CELERY WORKER =====
   celery_worker:
@@ -73,26 +81,15 @@ services:
       dockerfile: Dockerfile
     container_name: fiscalai-celery-worker
     command: celery -A app.tasks worker --loglevel=info --concurrency=4
-    environment:
-      - ENV=production
-      - DEBUG=False
-      - DATABASE_URL=postgresql://fiscalai_user:FiscalAI#Postgres2026!@postgres:5432/fiscalai_db
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=FiscalAI#MinIO2026!@Secure
-      - MINIO_BUCKET=fiscalai-documents
-      - LOG_LEVEL=INFO
+    env_file:
+      - .env.prod
     depends_on:
       - redis
       - postgres
     restart: always
     networks:
       - fiscalai
-    volumes:
-      - ../backend:/app:ro
+    # REMOVIDO: ../backend:/app:ro — na VPS o código está dentro da imagem Docker
 
   # ===== FLOWER (Celery Monitoring) =====
   flower:
@@ -101,11 +98,9 @@ services:
       dockerfile: Dockerfile
     container_name: fiscalai-flower
     command: celery -A app.tasks flower --port=5555
-    ports:
-      - "5555:5555"
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    # Sem ports aqui — Caddy acessa internamente com autenticação básica
+    env_file:
+      - .env.prod
     depends_on:
       - redis
     restart: always
@@ -116,20 +111,16 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: fiscalai-postgres
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: fiscalai_user
-      POSTGRES_PASSWORD: FiscalAI#Postgres2026!
-      POSTGRES_DB: fiscalai_db
-      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=pt_BR.UTF-8"
+    # Sem ports aqui — somente serviços internos acessam o banco
+    env_file:
+      - .env.prod
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
     networks:
       - fiscalai
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fiscalai_user -d fiscalai_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fiscalai_user} -d ${POSTGRES_DB:-fiscalai_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -139,8 +130,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: fiscalai-redis
-    ports:
-      - "6379:6379"
+    # Sem ports aqui — somente serviços internos acessam o Redis
     command: redis-server --appendonly yes --loglevel warning
     volumes:
       - redis_data:/data
@@ -158,13 +148,9 @@ services:
   minio:
     image: minio/minio:latest
     container_name: fiscalai-minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: FiscalAI#MinIO2026!@Secure
-      MINIO_BROWSER_REDIRECT_URL: https://adriner.fr/fiscalia/minio
+    # Sem ports aqui — Caddy acessa internamente (console protegido)
+    env_file:
+      - .env.prod
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -184,6 +170,10 @@ volumes:
   redis_data:
     driver: local
   minio_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local
 
 networks:

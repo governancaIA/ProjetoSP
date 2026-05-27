@@ -39,6 +39,8 @@ ENV/
 .env
 .env.local
 .env.*.local
+.env.prod
+infra/.env.prod
 
 # Testing
 .pytest_cache/

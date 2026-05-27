@@ -10,13 +10,13 @@ Setup automático FiscalAI no EasyPanel via API v2
 5. Aguarda build e retorna URLs
 
 .EXAMPLE
-.\setup-easypanel.ps1 -APIKey "sua_chave" -GitRepo "https://github.com/seu/repo.git"
+.\setup-easypanel.ps1 -APIKey "ecd19631a376d1952cba3a16006a6d027e2c41a4346ca040ca803c509aa1c1c7" -GitRepo "https://github.com/governancaIA/ProjetoSP.git"
 #>
 
 param(
     [string]$APIKey = "ecd19631a376d1952cba3a16006a6d027e2c41a4346ca040ca803c509aa1c1c7",
     [string]$GitRepo = "https://github.com/governancaIA/ProjetoSP.git",
-    [string]$EasyPanelHost = "https://dashboard.easypanel.io"
+    [string]$EasyPanelHost = "http://89.116.214.246:3000"
 )
 
 Write-Host ""
