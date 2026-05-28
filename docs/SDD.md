@@ -671,7 +671,8 @@ session.execute(text(f'SET search_path TO "{schema_name}", public'))
 
 ### 8.5 Transport Security
 
-- HTTPS enforced in production (nginx TLS termination)
+- HTTPS enforced in production via **Caddy reverse proxy** (Let's Encrypt, automatic cert renewal)
+- Caddy handles TLS termination for `adriner.fr`; services communicate over internal Docker network `fiscalai`
 - `MINIO_USE_SSL=True` in production
 - CORS: explicit domain whitelist; never `*` with credentials
 - Rate limiting: 10 requests/minute on upload; 100 requests/minute default
@@ -709,12 +710,13 @@ Enterprise (100+):    Database-per-tenant (dedicated RDS for large orgs)
 
 ### 9.4 Observability
 
-| Layer | Tool |
-|---|---|
-| Structured logs | python-json-logger → JSON per line |
-| Task monitoring | Flower (Celery Web UI at :5555) |
-| Health check | `GET /health` → PostgreSQL + Redis + MinIO connectivity |
-| Metrics (planned) | OpenTelemetry + Prometheus + Grafana |
+| Layer | Tool | Status |
+|---|---|---|
+| Structured logs | python-json-logger → JSON per line; `X-Request-ID` propagated | ✅ Done |
+| Task monitoring | Flower (Celery Web UI at :5555, SSH tunnel in prod) | ✅ Done |
+| Health check | `GET /health` → PostgreSQL + Redis + MinIO connectivity | ✅ Done |
+| Metrics | Prometheus `/metrics` endpoint (requests, latency, task queue depth) | ✅ Done |
+| Traces (planned) | OpenTelemetry + Grafana | Fase 2 |
 
 Critical alerts:
 - PostgreSQL connections > 90% of `max_connections`
@@ -752,18 +754,36 @@ docker-compose up -d
 # MinIO:    http://localhost:9000
 ```
 
-### 10.3 Production (VPS — CI/CD via GitHub Actions)
+### 10.3 Production (VPS Hostinger — Manual Deploy)
 
+**Infrastructure:**
+- VPS: `89.116.214.246` (Hostinger)
+- Domain: `adriner.fr` → DNS A record pointing to VPS IP
+- Reverse proxy: **Caddy** (automatic Let's Encrypt TLS)
+- Services communicate over internal Docker network `fiscalai` (172.25.0.0/16)
+- Only ports 80 and 443 are exposed to the host
+
+**Deploy:**
+```bash
+# From VPS: /opt/fiscalai/infra
+docker compose -f docker-compose.prod.yml up -d --build
 ```
-main branch push
-    │
-    ▼ (.github/workflows/deploy.yml)
-GitHub Actions
-    ├── run tests (pytest)
-    ├── build Docker images
-    ├── push to registry
-    └── SSH deploy to VPS Hostinger
-            └── docker-compose -f infra/docker-compose.prod.yml up -d
+
+**Activate HTTPS with adriner.fr:**
+1. Set DNS A record: `adriner.fr → 89.116.214.246`
+2. Edit `infra/caddy/Caddyfile` — replace `:80` block with `adriner.fr` block (template is in the file, commented out)
+3. Restart Caddy: `docker compose -f docker-compose.prod.yml up -d caddy`
+4. Caddy obtains Let's Encrypt cert automatically on first request
+
+**Monitoring (SSH tunnel required):**
+```bash
+# Flower (Celery jobs)
+ssh -L 5555:127.0.0.1:5555 root@89.116.214.246
+# → http://localhost:5555
+
+# MinIO console
+ssh -L 9001:127.0.0.1:9001 root@89.116.214.246
+# → http://localhost:9001
 ```
 
 ### 10.4 Environment Variables
@@ -808,16 +828,16 @@ Full template: `backend/.env.example`
 | 15 | Completude Parser SPED + Cruzamento | ✅ parcial 2026-05-26 |
 | 16 | Tabelas de Referência Fiscal no BD | ✅ parcial 2026-05-26 |
 
-### Phase 2 Epics (not started)
+### In-Progress / Phase 2 Epics
 
-| # | Epic | Priority |
-|---|---|---|
-| 3 | Detecção de Inconsistências com IA (Isolation Forest, DBSCAN) | Fase 2 |
-| 9 | API Pública e Integrações ERP (SAP, TOTVS, Sankhya) | Fase 2 |
-| 10 | Segurança, LGPD e Observabilidade (OpenTelemetry full) | Fase 2 |
-| 17 | Performance e Escalabilidade | Em andamento |
-| 18 | Observabilidade e Health Check | Em andamento |
-| 11 | Onboarding, Planos e Monetização | Fase 3 |
+| # | Epic | Status | Notes |
+|---|---|---|---|
+| 3 | Detecção de Inconsistências com IA | 🟡 Parcial | Z-score + sequências + ranking fornecedores ✅ (Sprint F); Isolation Forest, CNPJ inapto, clustering ❌ |
+| 10 | Segurança, LGPD e Observabilidade | 🟡 Parcial | Audit log + Prometheus + PII masking ✅; OpenTelemetry full ❌ |
+| 17 | Performance e Escalabilidade | 🟡 Parcial | Streaming upload + temp file ✅; HPA, chunking paralelo ❌ |
+| 18 | Observabilidade e Health Check | 🟡 Parcial | `/health`, structured logs, Prometheus ✅; Grafana dashboard ❌ |
+| 9 | API Pública e Integrações ERP | 🔲 Não iniciada | Fase 2 |
+| 11 | Onboarding, Planos e Monetização | 🔲 Não iniciada | Fase 3 |
 
 ---
 

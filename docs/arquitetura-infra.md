@@ -1,10 +1,23 @@
 # Arquitetura de Infraestrutura — FiscalAI MVP
 
-**Data:** 2026-05-24  
-**Status:** Approved for EPIC 1 Implementation  
-**Stack:** PostgreSQL (schema-per-tenant) + MinIO + Celery + Redis  
-**Custo Initial:** ~$0 (VPS Hostinger existente)  
+**Criado:** 2026-05-24 | **Atualizado:** 2026-05-28  
+**Status:** MVP implementado e rodando em produção  
+**Stack:** PostgreSQL (schema-per-tenant) + MinIO + Celery + Redis + Caddy  
+**Custo atual:** ~$0 (VPS Hostinger existente)  
 **Escalabilidade:** 50–100 clientes em 1 VPS; migração para DB-per-tenant em ~2–3 sprints  
+
+## Produção atual
+
+| Componente | Valor |
+|---|---|
+| VPS | Hostinger — `89.116.214.246` |
+| Domínio | `adriner.fr` (DNS A → VPS IP) |
+| Reverse proxy | Caddy 2 (TLS automático via Let's Encrypt) |
+| Compose file | `infra/docker-compose.prod.yml` |
+| Acesso Flower | SSH tunnel: `ssh -L 5555:127.0.0.1:5555 root@89.116.214.246` |
+| Acesso MinIO console | SSH tunnel: `ssh -L 9001:127.0.0.1:9001 root@89.116.214.246` |
+
+
 
 ---
 
@@ -193,27 +206,32 @@ CREATE DATABASE fiscal_org_123;
 
 ## 5. IMPLEMENTAÇÃO: CHECKLIST
 
-### Semana 1: Infrastructure Setup
-- [ ] `docker-compose.yml` com: PostgreSQL, Redis, MinIO, FastAPI
-- [ ] `.env.example` com credenciais (MinIO, Postgres, Redis URLs)
-- [ ] Script de bootstrap: cria primeiro schema `tenant_org_001`
-- [ ] Alembic migration framework pronto
+> Estado em 2026-05-28 — todos os itens do MVP concluídos.
 
-### Semana 2: Tenant Router & ORM
-- [ ] `backend/app/core/tenant.py` — Extrai tenant_id de JWT token
-- [ ] `backend/app/core/database.py` — Rota queries para schema correto
-- [ ] SQLAlchemy `event listener` que injeta `tenant_id` em queries
-- [ ] RLS habilitado em todas as tabelas
+### Semana 1: Infrastructure Setup ✅
+- [x] `docker-compose.yml` com: PostgreSQL, Redis, MinIO, FastAPI, Celery, Flower
+- [x] `.env.example` com credenciais (MinIO, Postgres, Redis URLs)
+- [x] Schema de tenant criado atomicamente no register (`create_tenant_schema()`)
+- [x] Alembic migration framework com migrations 001–006
 
-### Semana 3–4: Parsers + Celery Tasks
-- [ ] `parsers/detector.py`, `sped_parser.py`, `nfe_parser.py`
-- [ ] `tasks/parse_document.py` — Celery chain setup
-- [ ] `api/uploads.py` — FastAPI routes
+### Semana 2: Tenant Router & ORM ✅
+- [x] `backend/app/core/middleware.py` — `TenantMiddleware` extrai `tenant_id` do JWT
+- [x] `backend/app/api/deps.py` — `get_db()` seta `SET search_path = tenant_<id>, public`
+- [x] Sanitização de `tenant_id` com regex antes de interpolação SQL (EPIC 13)
+- [x] RLS habilitado em todas as tabelas por tenant
 
-### Semana 5: Tests + Monitoring
-- [ ] Tests unitários para cada parser
-- [ ] Flower (Celery monitoring) acessível em `/flower`
-- [ ] Prometheus metrics (parsing duration, error rate)
+### Semana 3–4: Parsers + Celery Tasks ✅
+- [x] `parsers/detector.py` — detecção automática de tipo/versão do arquivo
+- [x] `parsers/sped_efd_icms.py` — blocos 0, C, D, E com C100/C170/D100/E110
+- [x] `parsers/nfe_xml.py` + `parsers/cte_xml.py` — NF-e v4.0 e CT-e v3.0
+- [x] `parsers/efd_contribuicoes.py` — M100/M200 (PIS/COFINS por CST)
+- [x] `tasks/parse_document.py` + `tasks/validate_document.py` — Celery chain
+- [x] `api/uploads.py` — upload chunked streaming, SHA-256 dedup
+
+### Semana 5: Tests + Monitoring ✅
+- [x] 84+ testes unitários para parsers, regras e scoring
+- [x] Flower acessível via SSH tunnel (porta 5555 local only em prod)
+- [x] Prometheus `/metrics` com métricas de request, latência e fila Celery
 
 ---
 
