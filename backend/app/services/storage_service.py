@@ -2,9 +2,10 @@
 Storage service for MinIO/S3 file management
 """
 import hashlib
+import os
 import tempfile
 from io import BytesIO
-from typing import AsyncIterator, Tuple
+from typing import AsyncIterator, Optional, Tuple
 from minio import Minio
 from minio.error import S3Error
 import logging
@@ -15,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 # 8 MB chunks — MinIO multipart minimum is 5 MB; 8 MB balances memory vs round-trips
 _CHUNK_SIZE = 8 * 1024 * 1024
+
+# Multipart threshold: files >100 MB use MinIO's native multipart via part_size=
+# 50 MB parts × 4 Celery workers = 200 MB max simultaneous buffer (fits in 2 GB worker RAM)
+_MULTIPART_THRESHOLD = 100 * 1024 * 1024
+_PART_SIZE = 50 * 1024 * 1024
 
 
 class StorageServiceError(Exception):
@@ -58,13 +64,13 @@ class StorageService:
         """
         Stream-upload a file to MinIO without loading it fully in RAM.
 
-        Reads the async iterator in 8 MB chunks, computing SHA-256 and total
-        size incrementally, then uploads via MinIO put_object using a
-        synchronous BytesIO pipe filled from a collected buffer.
+        Writes incoming chunks to a temporary file on disk (peak RAM: one chunk = 8 MB
+        per concurrent upload regardless of file size), then uploads from disk to MinIO.
+        The temp file is always cleaned up, even on error.
 
         Args:
-            file_stream: Async iterator yielding bytes (from UploadFile.stream())
-            key: Storage key
+            file_stream: Async iterator yielding bytes
+            key: Storage key (must be the permanent key — no rename after)
             content_type: MIME type
             max_size: Hard limit in bytes — raises StorageServiceError if exceeded
 
@@ -76,13 +82,11 @@ class StorageService:
         """
         hasher = hashlib.sha256()
         total_bytes = 0
-
-        # Spill to disk after 50 MB — avoids OOM on large SPED files while
-        # keeping small files fast (in-memory spool)
-        _SPOOL_THRESHOLD = 50 * 1024 * 1024
+        tmp_path: Optional[str] = None
 
         try:
-            with tempfile.SpooledTemporaryFile(max_size=_SPOOL_THRESHOLD) as spool:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp_path = tmp.name
                 async for chunk in file_stream:
                     total_bytes += len(chunk)
                     if total_bytes > max_size:
@@ -90,20 +94,25 @@ class StorageService:
                             f"File exceeds maximum size of {max_size} bytes"
                         )
                     hasher.update(chunk)
-                    spool.write(chunk)
+                    tmp.write(chunk)
 
-                file_hash = hasher.hexdigest()
-                spool.seek(0)
+            file_hash = hasher.hexdigest()
+            use_multipart = total_bytes > _MULTIPART_THRESHOLD
 
+            with open(tmp_path, "rb") as f:
                 self.client.put_object(
                     self.bucket,
                     key,
-                    spool,
+                    f,
                     length=total_bytes,
                     content_type=content_type,
+                    part_size=_PART_SIZE if use_multipart else 0,
                 )
 
-            logger.info(f"Streamed upload {key} ({total_bytes} bytes) to {self.bucket}")
+            logger.info(
+                f"Streamed upload {key} ({total_bytes} bytes, "
+                f"multipart={use_multipart}) to {self.bucket}"
+            )
             return key, file_hash, total_bytes
 
         except StorageServiceError:
@@ -114,6 +123,12 @@ class StorageService:
         except Exception as e:
             logger.error(f"Unexpected error uploading {key}: {str(e)}")
             raise StorageServiceError(f"Unexpected error during upload: {str(e)}")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    logger.warning(f"Failed to clean up temp file: {tmp_path}")
 
     def upload(
         self,

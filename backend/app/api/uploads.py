@@ -7,6 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, AsyncIterator
 import logging
+import uuid
 
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
@@ -42,9 +43,6 @@ async def _iter_upload(file: UploadFile) -> AsyncIterator[bytes]:
 
 # Storage quota per tenant per month: 10GB default
 STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024  # 10GB
-
-# Temporary key prefix used before hash is known; replaced after streaming
-_TEMP_PREFIX = "__tmp__"
 
 
 class UploadError(Exception):
@@ -124,15 +122,16 @@ async def upload_files(
                 if storage is None:
                     storage = StorageService()
 
-                # Use a temporary key — we don't know the hash yet (computed during streaming)
+                # UUID-based key: permanent from the start — no copy_object rename needed.
+                # Hash is stored in DB for dedup; the storage key is just a unique identifier.
                 ext = _get_file_extension(file.filename)
-                temp_key = f"{_TEMP_PREFIX}{tenant_id}/{file.filename}"
+                upload_key = f"{tenant_id}/uploads/{uuid.uuid4().hex}.{ext}"
 
                 try:
                     # Stream upload: hash and size computed incrementally, no full-file read
                     _, file_hash, file_size = await storage.upload_stream(
                         file_stream=_iter_upload(file),
-                        key=temp_key,
+                        key=upload_key,
                         content_type=file.content_type,
                         max_size=MAX_FILE_SIZE,
                     )
@@ -155,9 +154,8 @@ async def upload_files(
                 # Check quota with actual size
                 new_usage = current_usage + file_size
                 if new_usage > STORAGE_QUOTA_BYTES:
-                    # Clean up the temp upload
                     try:
-                        storage.delete(temp_key)
+                        storage.delete(upload_key)
                     except Exception:
                         pass
                     results.append({
@@ -176,7 +174,7 @@ async def upload_files(
                 if existing_doc:
                     logger.info(f"Duplicate detected: {file.filename} (hash: {file_hash})")
                     try:
-                        storage.delete(temp_key)
+                        storage.delete(upload_key)
                     except Exception:
                         pass
                     results.append({
@@ -187,26 +185,7 @@ async def upload_files(
                     })
                     continue
 
-                # Move temp key to final key (copy + delete, MinIO has no rename)
-                final_key = StorageService.build_storage_key(
-                    tenant_id=tenant_id,
-                    document_type="unknown",
-                    file_hash=file_hash,
-                    ext=ext,
-                )
-                try:
-                    from minio.commonconfig import CopySource
-                    storage.client.copy_object(
-                        storage.bucket,
-                        final_key,
-                        CopySource(storage.bucket, temp_key),
-                    )
-                    storage.delete(temp_key)
-                except Exception as e:
-                    logger.warning(f"Could not rename temp key, keeping as final: {str(e)}")
-                    final_key = temp_key  # fallback: use temp key as final
-
-                # Create Document record
+                # Create Document record with the UUID-based key
                 doc = DocumentService.create_document_record(
                     db=db,
                     tenant_id=tenant_id,
@@ -214,7 +193,7 @@ async def upload_files(
                     document_type=DocumentType.UNKNOWN,
                     file_hash=file_hash,
                     file_size=file_size,
-                    storage_key=final_key,
+                    storage_key=upload_key,
                     storage_bucket=storage.bucket,
                 )
 

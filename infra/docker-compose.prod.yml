@@ -1,10 +1,12 @@
-version: '3.8'
-
 # ============================================================
 #  FiscalAI — Produção (VPS Ubuntu / Hostinger)
 #  Reverse proxy: Caddy (SSL automático via Let's Encrypt)
 #  Apenas as portas 80 e 443 ficam abertas ao host.
 #  Todos os outros serviços ficam na rede interna `fiscalai`.
+#
+#  IMPORTANTE: executar sempre a partir do diretório infra/
+#    cd /opt/fiscalai/infra
+#    docker compose -f docker-compose.prod.yml up -d <serviço>
 # ============================================================
 
 services:

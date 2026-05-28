@@ -5,6 +5,7 @@ Suporta branding configurável via BRAND_* settings (white-label adriner.fr).
 from __future__ import annotations
 
 import io
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -15,6 +16,8 @@ from app.core.config import settings
 from app.models.fiscal_document import FiscalDocument
 from app.models.rule_log import RuleExecutionLog
 from app.services.scoring_service import AlertSeverity, ScoringService
+
+logger = logging.getLogger(__name__)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -84,6 +87,82 @@ def _get_period_score(db: Session, tenant_id: str, year: int, month: int) -> dic
     return ScoringService.get_period_score(db, tenant_id, year, month)
 
 
+# ── AI Narrative ─────────────────────────────────────────────────────────────
+
+_NARRATIVE_SYSTEM = (
+    "Você é um auditor fiscal especialista no sistema tributário brasileiro. "
+    "Analise os dados de auditoria fornecidos e redija um parágrafo executivo "
+    "objetivo e profissional (máximo 5 frases) resumindo os principais riscos "
+    "fiscais do período, as regras mais violadas e recomendações de ação imediata. "
+    "Escreva em português formal. Não use markdown. Não mencione valores de CNPJ "
+    "nem dados pessoais identificáveis — apenas totais e percentuais agregados."
+)
+
+
+def generate_narrative(period_data: dict, alerts: list[dict], year: int, month: int) -> str:
+    """
+    Gera parágrafo executivo de auditoria usando Claude via Anthropic API.
+    Retorna string vazia se ANTHROPIC_API_KEY não estiver configurada ou em caso de erro.
+    Usa prompt caching no system prompt para reduzir custo em chamadas repetidas.
+    """
+    if not settings.ANTHROPIC_API_KEY:
+        return ""
+
+    try:
+        import anthropic
+
+        month_names = [
+            "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+        ]
+        month_name = month_names[month]
+
+        score = period_data.get("period_score", 100)
+        total_exposure = period_data.get("total_exposure", 0.0)
+        docs_count = period_data.get("documents_processed", 0)
+        critical_count = period_data.get("critical_documents", 0)
+        top_rules = period_data.get("top_3_rules", [])
+
+        severity_counts: dict[str, int] = {}
+        for alert in alerts:
+            sev = alert.get("severity_label", "–")
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+        rules_summary = ", ".join(f"{r['rule_id']} ({r['failures']} ocorrências)" for r in top_rules)
+
+        user_prompt = (
+            f"Período: {month_name}/{year}\n"
+            f"Score de risco: {score}/100\n"
+            f"Exposição estimada total: R$ {float(total_exposure):,.2f}\n"
+            f"Documentos processados: {docs_count} | Documentos críticos: {critical_count}\n"
+            f"Total de alertas: {len(alerts)}\n"
+            f"Distribuição por severidade: {severity_counts}\n"
+            f"Regras com mais violações: {rules_summary or 'nenhuma'}\n\n"
+            "Redija o parágrafo executivo de auditoria."
+        )
+
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            system=[
+                {
+                    "type": "text",
+                    "text": _NARRATIVE_SYSTEM,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+
+        return response.content[0].text.strip()
+
+    except Exception as exc:
+        logger.warning("Narrative generation failed — PDF will be generated without AI summary: %s", exc)
+        return ""
+
+
 # ── PDF ───────────────────────────────────────────────────────────────────────
 
 def generate_pdf_report(db: Session, tenant_id: str, year: int, month: int) -> bytes:
@@ -107,6 +186,7 @@ def generate_pdf_report(db: Session, tenant_id: str, year: int, month: int) -> b
 
     period_data = _get_period_score(db, tenant_id, year, month)
     alerts = _get_period_alerts(db, tenant_id, year, month)
+    narrative = generate_narrative(period_data, alerts, year, month)
 
     score = period_data.get("period_score", 100)
     total_exposure = period_data.get("total_exposure", 0.0)
@@ -189,6 +269,24 @@ def generate_pdf_report(db: Session, tenant_id: str, year: int, month: int) -> b
     ]))
     story.append(kpi_table)
     story.append(Spacer(1, 0.5 * cm))
+
+    # ── AI Narrative ──
+    if narrative:
+        story.append(Paragraph("Análise Executiva", section_style))
+        narrative_style = ParagraphStyle(
+            "Narrative",
+            parent=body_style,
+            fontSize=10,
+            leading=15,
+            borderPadding=(8, 10, 8, 10),
+            backColor=colors.HexColor("#f0f4ff"),
+            borderColor=colors.HexColor("#c7d2fe"),
+            borderWidth=1,
+            borderRadius=4,
+            spaceAfter=8,
+        )
+        story.append(Paragraph(narrative, narrative_style))
+        story.append(Spacer(1, 0.3 * cm))
 
     # ── Top regras ──
     if top_rules:
@@ -276,6 +374,197 @@ def generate_pdf_report(db: Session, tenant_id: str, year: int, month: int) -> b
         story.append(Paragraph(cta, ParagraphStyle("CTA", parent=body_style, textColor=brand_color)))
 
     doc.build(story)
+    return buf.getvalue()
+
+
+# ── PDF por Documento ────────────────────────────────────────────────────────
+
+def generate_pdf_document(db: Session, tenant_id: str, document_id: int) -> bytes:
+    """
+    Gera relatório PDF para um único documento (upload), listando todos os
+    fiscal_documents e seus alertas de validação.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        HRFlowable,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+    from reportlab.lib.enums import TA_CENTER
+
+    from app.models.document import Document
+
+    doc_record = (
+        db.query(Document)
+        .filter(Document.id == document_id, Document.tenant_id == tenant_id)
+        .first()
+    )
+    if doc_record is None:
+        raise ValueError(f"Documento {document_id} não encontrado para o tenant")
+
+    fiscal_docs = (
+        db.query(FiscalDocument)
+        .options(joinedload(FiscalDocument.rule_logs))
+        .filter(
+            FiscalDocument.document_id == document_id,
+            FiscalDocument.tenant_id == tenant_id,
+            FiscalDocument.superseded == False,  # noqa: E712
+        )
+        .all()
+    )
+
+    # Collect all alerts across fiscal documents
+    all_alerts: list[dict] = []
+    for fdoc in fiscal_docs:
+        for log in fdoc.rule_logs:
+            if log.passed:
+                continue
+            severity, exposure = ScoringService.calculate_alert_severity(log, fdoc)
+            all_alerts.append(
+                {
+                    "rule_id": log.rule_id,
+                    "severity": severity,
+                    "severity_label": SEVERITY_PT.get(severity.value, severity.value),
+                    "emitente": fdoc.emitente_nome or "–",
+                    "numero_nf": fdoc.numero_nf or "–",
+                    "data_emissao": fdoc.data_emissao.strftime("%d/%m/%Y") if fdoc.data_emissao else "–",
+                    "valor_nf": float(fdoc.valor_total or 0),
+                    "exposure": float(exposure),
+                    "message": log.message or "",
+                }
+            )
+    all_alerts.sort(key=lambda a: (SEVERITY_ORDER[a["severity"]], -a["exposure"]))
+
+    # Compute aggregate score
+    total_rules = sum(len(fd.rule_logs) for fd in fiscal_docs)
+    failed_rules = sum(1 for fd in fiscal_docs for log in fd.rule_logs if not log.passed)
+    passed_rules = total_rules - failed_rules
+    doc_score = ScoringService.compute_score_from_loaded(fiscal_docs[0])["document_score"] if fiscal_docs else 100
+    total_exposure = sum(a["exposure"] for a in all_alerts)
+
+    brand = settings.BRAND_NAME or "FiscalAI"
+    expert_name = settings.BRAND_EXPERT_NAME
+    expert_title = settings.BRAND_EXPERT_TITLE
+    whatsapp = settings.BRAND_WHATSAPP
+
+    if doc_score >= 80:
+        score_color = colors.HexColor("#16a34a")
+    elif doc_score >= 50:
+        score_color = colors.HexColor("#d97706")
+    else:
+        score_color = colors.HexColor("#dc2626")
+
+    buf = io.BytesIO()
+    reportlab_doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        rightMargin=2 * cm, leftMargin=2 * cm,
+        topMargin=2 * cm, bottomMargin=2 * cm,
+    )
+
+    styles = getSampleStyleSheet()
+    brand_color = colors.HexColor("#1e3a5f")
+    title_style = ParagraphStyle("Title", parent=styles["Title"], textColor=brand_color, fontSize=20, spaceAfter=4)
+    subtitle_style = ParagraphStyle("Sub", parent=styles["Normal"], textColor=colors.HexColor("#64748b"), fontSize=10, spaceAfter=2)
+    section_style = ParagraphStyle("Section", parent=styles["Heading2"], textColor=brand_color, fontSize=12, spaceBefore=14, spaceAfter=5)
+    small_style = ParagraphStyle("Small", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#64748b"))
+    center_style = ParagraphStyle("Center", parent=styles["Normal"], alignment=TA_CENTER, fontSize=10)
+
+    story = []
+
+    story.append(Paragraph(brand, title_style))
+    story.append(Paragraph(f"Relatório de Documento — {doc_record.original_filename}", subtitle_style))
+    story.append(Paragraph(f"Tipo: {doc_record.document_type.value if doc_record.document_type else '–'} · Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')}", small_style))
+    story.append(HRFlowable(width="100%", thickness=2, color=brand_color, spaceAfter=12))
+
+    # KPIs
+    score_label = "Excelente" if doc_score >= 80 else ("Atenção" if doc_score >= 50 else "Crítico")
+    kpi_data = [
+        ["Score", "Exposição Estimada", "Regras Falhadas", "Regras OK"],
+        [
+            Paragraph(f'<font color="{score_color.hexval()}" size="18"><b>{doc_score}/100</b></font><br/><font size="9">{score_label}</font>', center_style),
+            Paragraph(f'<b>{_currency(total_exposure)}</b>', center_style),
+            Paragraph(f'<font color="#dc2626"><b>{failed_rules}</b></font>', center_style),
+            Paragraph(f'<font color="#16a34a"><b>{passed_rules}</b></font>', center_style),
+        ],
+    ]
+    kpi_table = Table(kpi_data, colWidths=[3.8 * cm, 4.5 * cm, 3.5 * cm, 3.5 * cm])
+    kpi_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), brand_color),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 10),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(kpi_table)
+    story.append(Spacer(1, 0.5 * cm))
+
+    # Alertas
+    if all_alerts:
+        story.append(Paragraph(f"Inconsistências Detectadas ({len(all_alerts)})", section_style))
+        alert_data = [["Severidade", "Regra", "Emitente", "Data", "Valor NF", "Exposição"]]
+        sev_colors_map = {
+            "Crítico": colors.HexColor("#fef2f2"),
+            "Alto": colors.HexColor("#fff7ed"),
+            "Médio": colors.HexColor("#fefce8"),
+        }
+        for a in all_alerts:
+            alert_data.append([
+                a["severity_label"],
+                a["rule_id"],
+                a["emitente"][:28],
+                a["data_emissao"],
+                _currency(a["valor_nf"]),
+                _currency(a["exposure"]),
+            ])
+        alert_table = Table(
+            alert_data,
+            colWidths=[2.2 * cm, 3.8 * cm, 4.5 * cm, 2.2 * cm, 2.5 * cm, 2.5 * cm],
+        )
+        row_styles = []
+        for i, row in enumerate(all_alerts, start=1):
+            bg = sev_colors_map.get(row["severity_label"], colors.HexColor("#f8fafc"))
+            row_styles.append(("BACKGROUND", (0, i), (-1, i), bg))
+        alert_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), brand_color),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            *row_styles,
+        ]))
+        story.append(alert_table)
+    else:
+        story.append(Paragraph("Nenhuma inconsistência detectada neste documento.", ParagraphStyle("OK", parent=styles["Normal"], textColor=colors.HexColor("#16a34a"), fontSize=10)))
+
+    story.append(Spacer(1, cm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e2e8f0"), spaceAfter=8))
+
+    if expert_name:
+        footer_lines = [f"<b>{expert_name}</b>"]
+        if expert_title:
+            footer_lines.append(expert_title)
+        if whatsapp:
+            footer_lines.append(f"WhatsApp: {whatsapp}")
+        footer_lines.append(f"Relatório gerado por {brand} em {datetime.now().strftime('%d/%m/%Y')}")
+        story.append(Paragraph("<br/>".join(footer_lines), small_style))
+    else:
+        story.append(Paragraph(f"Relatório gerado por {brand} em {datetime.now().strftime('%d/%m/%Y')}", small_style))
+
+    reportlab_doc.build(story)
     return buf.getvalue()
 
 

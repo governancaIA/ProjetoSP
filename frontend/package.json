@@ -23,7 +23,8 @@
     "@radix-ui/react-slot": "^1.1.0",
     "@radix-ui/react-select": "^2.1.1",
     "@radix-ui/react-separator": "^1.1.0",
-    "date-fns": "^3.6.0"
+    "date-fns": "^3.6.0",
+    "sonner": "^1.7.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

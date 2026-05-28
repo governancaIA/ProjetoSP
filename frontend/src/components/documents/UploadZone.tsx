@@ -1,7 +1,9 @@
 import { useCallback, useState } from 'react'
 import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { uploadFiles } from '@/services/api'
+import { useJobPolling } from '@/hooks/useJobPolling'
 import type { UploadFileResult } from '@/types/api'
 
 interface UploadZoneProps {
@@ -13,6 +15,7 @@ interface FileUploadState {
   progress: number
   status: 'pending' | 'uploading' | 'done' | 'error'
   result?: UploadFileResult
+  jobId?: string
 }
 
 function formatBytes(bytes: number): string {
@@ -25,6 +28,48 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [files, setFiles] = useState<FileUploadState[]>([])
   const [isUploading, setIsUploading] = useState(false)
+
+  // Track which job we're polling
+  const jobsInProgress = files
+    .filter((f) => f.status === 'uploading' && f.jobId)
+    .map((f) => f.jobId)
+  const currentJobId = jobsInProgress[0] ?? null
+
+  useJobPolling(currentJobId, {
+    interval: 2000,
+    onComplete: (jobData) => {
+      toast.success(`Documento processado: ${jobData.original_filename}`)
+
+      // Update file status to done
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.jobId === jobData.job_id
+            ? {
+                ...f,
+                status: 'done',
+                progress: 100,
+                result: {
+                  filename: jobData.original_filename ?? f.file.name,
+                  status: 'accepted',
+                },
+              }
+            : f
+        )
+      )
+
+      // Trigger refetch if all jobs done
+      setTimeout(() => {
+        const stillProcessing = files.some((f) => f.status === 'uploading')
+        if (!stillProcessing) {
+          onUploadComplete?.()
+        }
+      }, 500)
+    },
+    onError: (error) => {
+      console.error('Polling error:', error)
+      // Don't toast every error — will retry automatically
+    },
+  })
 
   const addFiles = useCallback((incoming: FileList | File[]) => {
     const arr = Array.from(incoming)
@@ -75,30 +120,57 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
         }
       )
 
-      // Map results back to files
+      // Map results back to files with job IDs
       setFiles((prev) => {
         const uploading = prev.filter((f) => f.status === 'uploading')
         const rest = prev.filter((f) => f.status !== 'uploading')
         const updated = uploading.map((f, i) => {
           const result = response.results[i]
-          return {
-            ...f,
-            progress: 100,
-            status: result?.status === 'accepted' ? ('done' as const) : ('error' as const),
-            result,
+          if (result?.status === 'accepted' && result.job_id) {
+            toast.info(`Processando: ${f.file.name}...`)
+            return {
+              ...f,
+              progress: 100,
+              status: 'uploading' as const, // Stay uploading until polling completes
+              result,
+              jobId: result.job_id,
+            }
+          } else if (result?.status === 'duplicate') {
+            toast.warning(`Arquivo duplicado: ${f.file.name}`)
+            return {
+              ...f,
+              progress: 100,
+              status: 'done' as const,
+              result,
+            }
+          } else {
+            toast.error(`Erro ao enviar ${f.file.name}: ${result?.reason}`)
+            return {
+              ...f,
+              progress: 0,
+              status: 'error' as const,
+              result: result ?? {
+                filename: f.file.name,
+                status: 'error',
+                reason: 'Erro desconhecido',
+              },
+            }
           }
         })
         return [...rest, ...updated]
       })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Upload falhou'
+      toast.error(message)
 
-      if (response.summary.accepted > 0) {
-        onUploadComplete?.()
-      }
-    } catch {
       setFiles((prev) =>
         prev.map((f) =>
           f.status === 'uploading'
-            ? { ...f, status: 'error', result: { filename: f.file.name, status: 'error', reason: 'Upload falhou' } }
+            ? {
+                ...f,
+                status: 'error',
+                result: { filename: f.file.name, status: 'error', reason: message },
+              }
             : f
         )
       )
@@ -114,7 +186,10 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       {/* Drop zone */}
       <div
         onDrop={onDrop}
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+        }}
         onDragLeave={() => setIsDragging(false)}
         className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
           isDragging
@@ -154,10 +229,16 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
               </span>
               <span className="shrink-0 text-slate-400">{formatBytes(item.file.size)}</span>
 
-              {item.status === 'uploading' && (
+              {item.status === 'uploading' && item.progress < 100 && (
                 <span className="flex items-center gap-1 text-blue-600">
                   <Loader2 size={14} className="animate-spin" />
                   {item.progress}%
+                </span>
+              )}
+              {item.status === 'uploading' && item.progress === 100 && (
+                <span className="flex items-center gap-1 text-amber-600">
+                  <Loader2 size={14} className="animate-spin" />
+                  Processando...
                 </span>
               )}
               {item.status === 'done' && item.result?.status === 'accepted' && (
@@ -174,7 +255,10 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
               )}
               {item.status === 'pending' && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); removeFile(idx) }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    removeFile(idx)
+                  }}
                   className="text-slate-300 hover:text-red-400"
                 >
                   <X size={14} />

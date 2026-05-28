@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Anthropic (LLM narratives + RAG)
+    ANTHROPIC_API_KEY: str = ""
+
     # Branding (white-label / adriner.fr)
     BRAND_NAME: str = "FiscalAI"
     BRAND_EXPERT_NAME: str = ""

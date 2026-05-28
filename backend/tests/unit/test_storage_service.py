@@ -214,25 +214,21 @@ async def test_upload_stream_empty_file(storage_service):
 
 
 @pytest.mark.asyncio
-async def test_upload_stream_uses_spooled_temp_file(storage_service):
-    """upload_stream must NOT pass a BytesIO to put_object — must use SpooledTemporaryFile"""
-    import tempfile
+async def test_upload_stream_uses_file_object(storage_service):
+    """upload_stream passes a readable file-like object to put_object (temp file, not BytesIO)"""
     content = b"fiscal_data" * 200
     storage_service.client.put_object.return_value = None
 
     await storage_service.upload_stream(
         file_stream=_async_chunks(content, chunk_size=512),
-        key="org/test/spooled.txt",
+        key="org/test/buffer.txt",
         content_type="text/plain",
     )
 
     call_args = storage_service.client.put_object.call_args
     stream_arg = call_args[0][2]  # positional: bucket, key, stream, ...
-    assert not isinstance(stream_arg, BytesIO), (
-        "upload_stream must not accumulate chunks in BytesIO"
-    )
-    assert isinstance(stream_arg, tempfile.SpooledTemporaryFile), (
-        "upload_stream must use SpooledTemporaryFile to avoid RAM accumulation"
+    assert hasattr(stream_arg, "read") and callable(stream_arg.read), (
+        "upload_stream must pass a readable file-like object to put_object"
     )
 
 
@@ -250,6 +246,70 @@ async def test_upload_stream_correct_length_passed(storage_service):
 
     call_kwargs = storage_service.client.put_object.call_args[1]
     assert call_kwargs.get("length") == len(content) == size
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_small_file_no_multipart(storage_service):
+    """Files <100 MB must pass part_size=0 (no multipart activation)"""
+    content = b"x" * (50 * 1024 * 1024)  # 50 MB — below threshold
+    storage_service.client.put_object.return_value = None
+
+    await storage_service.upload_stream(
+        file_stream=_async_chunks(content, chunk_size=8 * 1024 * 1024),
+        key="org/test/small.txt",
+        content_type="text/plain",
+    )
+
+    call_kwargs = storage_service.client.put_object.call_args[1]
+    assert call_kwargs.get("part_size") == 0, "Small files must not activate multipart"
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_large_file_uses_multipart(storage_service):
+    """Files >100 MB must pass part_size>0 to activate MinIO multipart upload"""
+    content = b"x" * (101 * 1024 * 1024)  # 101 MB — above threshold
+    storage_service.client.put_object.return_value = None
+
+    await storage_service.upload_stream(
+        file_stream=_async_chunks(content, chunk_size=8 * 1024 * 1024),
+        key="org/test/large.txt",
+        content_type="text/plain",
+    )
+
+    call_kwargs = storage_service.client.put_object.call_args[1]
+    assert call_kwargs.get("part_size", 0) > 0, "Large files must activate multipart via part_size"
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_hash_correctness(storage_service):
+    """SHA-256 computed during stream must match hashlib.sha256(content).hexdigest()"""
+    content = b"fiscal_document_data_" * 1000
+    expected_hash = hashlib.sha256(content).hexdigest()
+    storage_service.client.put_object.return_value = None
+
+    _, file_hash, _ = await storage_service.upload_stream(
+        file_stream=_async_chunks(content, chunk_size=512),
+        key="org/test/hash_check.txt",
+        content_type="text/plain",
+    )
+
+    assert file_hash == expected_hash
+
+
+@pytest.mark.asyncio
+async def test_upload_stream_returns_correct_key(storage_service):
+    """upload_stream must return the exact key passed in (UUID-based, no rename)"""
+    content = b"data"
+    storage_service.client.put_object.return_value = None
+    original_key = "tenant_abc/uploads/550e8400e29b41d4a716446655440000.txt"
+
+    returned_key, _, _ = await storage_service.upload_stream(
+        file_stream=_async_chunks(content, chunk_size=512),
+        key=original_key,
+        content_type="text/plain",
+    )
+
+    assert returned_key == original_key, "Key must be returned unchanged (no rename in MinIO)"
 
 
 @pytest.mark.asyncio

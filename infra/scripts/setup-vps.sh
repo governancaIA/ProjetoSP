@@ -1,16 +1,19 @@
 #!/bin/bash
 # ============================================================
-#  FiscalAI — Setup Inicial da VPS (Ubuntu / Hostinger)
+#  FiscalAI — Setup Inicial da VPS (Ubuntu)
 #  Execute como root: bash setup-vps.sh
+#  Gera .env.prod com senhas aleatórias — sem edição manual.
 # ============================================================
 set -e
 
 REPO_URL="https://github.com/governancaIA/ProjetoSP.git"
-APP_DIR="/opt/fiscalai"
-DEPLOY_USER="deploy-fiscalai"
+APP_DIR="/opt/fiscalai/ProjetoSP"
+
+VPS_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 echo "========================================"
 echo "  FiscalAI — Setup VPS"
+echo "  IP: $VPS_IP"
 echo "========================================"
 
 # ---- 1. Atualizar sistema ----
@@ -48,11 +51,13 @@ echo "Firewall configurado: SSH + 80 + 443 liberados."
 # ---- 5. Clonar o repositório ----
 echo ""
 echo "[5/7] Clonando repositório em $APP_DIR..."
+mkdir -p /opt/fiscalai
 if [ -d "$APP_DIR/.git" ]; then
     echo "Repositório já existe. Fazendo git pull..."
     cd "$APP_DIR" && git pull origin main
 else
     git clone "$REPO_URL" "$APP_DIR"
+    cd "$APP_DIR"
 fi
 
 # ---- 6. Criar chave SSH para GitHub Actions ----
@@ -71,48 +76,90 @@ if [ ! -f "$SSH_KEY_PATH" ]; then
     echo "============================================================"
     cat "$SSH_KEY_PATH"
     echo "============================================================"
-    echo ""
 else
     echo "Chave SSH já existe em $SSH_KEY_PATH"
 fi
 
-# ---- 7. Criar .env.prod ----
+# ---- 7. Gerar .env.prod automaticamente ----
 echo ""
-echo "[7/7] Criando arquivo .env.prod..."
+echo "[7/7] Gerando .env.prod com senhas aleatórias..."
 ENV_FILE="$APP_DIR/infra/.env.prod"
 
-if [ -f "$ENV_FILE" ]; then
-    echo ".env.prod já existe — não sobrescrevendo."
-else
-    cp "$APP_DIR/infra/.env.prod.example" "$ENV_FILE"
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+POSTGRES_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+MINIO_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+
+cat > "$ENV_FILE" <<EOF
+# Gerado automaticamente por setup-vps.sh em $(date)
+# NÃO commite este arquivo no git.
+
+ENV=production
+DEBUG=False
+LOG_LEVEL=INFO
+SECRET_KEY=${SECRET_KEY}
+
+DOMAIN=${VPS_IP}
+ALLOWED_HOSTS=${VPS_IP}
+CORS_ORIGINS=http://${VPS_IP}
+
+POSTGRES_USER=fiscalai_user
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+POSTGRES_DB=fiscalai_db
+DATABASE_URL=postgresql://fiscalai_user:${POSTGRES_PASSWORD}@postgres:5432/fiscalai_db
+
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/1
+CELERY_RESULT_BACKEND=redis://redis:6379/2
+
+MINIO_ENDPOINT=minio:9000
+MINIO_ROOT_USER=fiscalai_minio_admin
+MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}
+MINIO_BUCKET=fiscalai-documents
+MINIO_BROWSER_REDIRECT_URL=http://${VPS_IP}:9001
+EOF
+
+echo "    .env.prod criado com sucesso."
+echo ""
+echo "    POSTGRES_PASSWORD : ${POSTGRES_PASSWORD}"
+echo "    MINIO_PASSWORD    : ${MINIO_PASSWORD}"
+echo "    (guarde em local seguro!)"
+
+# ---- Corrigir compose: remover version obsoleto ----
+COMPOSE_FILE="$APP_DIR/infra/docker-compose.prod.yml"
+if grep -q "^version:" "$COMPOSE_FILE" 2>/dev/null; then
+    sed -i '/^version:/d' "$COMPOSE_FILE"
     echo ""
-    echo "============================================================"
-    echo "  AÇÃO NECESSÁRIA: preencha o arquivo .env.prod"
-    echo "  nano $ENV_FILE"
-    echo "============================================================"
+    echo "    Linha 'version' obsoleta removida do docker-compose.prod.yml"
 fi
 
-# ---- Resumo ----
+# ---- Subir a stack ----
 echo ""
 echo "========================================"
-echo "  Setup concluído!"
+echo "  Subindo containers..."
 echo "========================================"
+cd "$APP_DIR/infra"
+docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+
 echo ""
-echo "Próximos passos:"
+echo "Aguardando banco de dados..."
+sleep 15
+
 echo ""
-echo "  1. Preencha os secrets no GitHub Actions:"
-echo "     SSH_HOST  = 89.116.214.246"
-echo "     SSH_USER  = root"
-echo "     SSH_PRIVATE_KEY = (conteúdo impresso acima)"
+echo "Rodando migrations..."
+docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
+
 echo ""
-echo "  2. Edite o .env.prod:"
-echo "     nano $ENV_FILE"
+echo "Status dos containers:"
+docker compose -f docker-compose.prod.yml ps
+
 echo ""
-echo "  3. Suba a stack manualmente pela primeira vez:"
-echo "     cd $APP_DIR/infra"
-echo "     docker compose -f docker-compose.prod.yml up -d --build"
+echo "========================================"
+echo "  Deploy concluído!"
+echo "  Acesse: http://${VPS_IP}"
 echo ""
-echo "  4. Verifique:"
-echo "     curl http://89.116.214.246/health"
-echo ""
-echo "  Depois disso, cada push na main fará deploy automático."
+echo "  Para CI/CD automático, adicione no GitHub"
+echo "  Settings > Secrets > Actions:"
+echo "    SSH_HOST        = ${VPS_IP}"
+echo "    SSH_USER        = root"
+echo "    SSH_PRIVATE_KEY = (impresso acima no passo 6)"
+echo "========================================"

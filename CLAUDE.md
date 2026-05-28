@@ -1,6 +1,7 @@
-# CLAUDE.md — FiscalAI
+# CLAUDE.md
 
-> Este arquivo é lido automaticamente pelo Claude Code em toda sessão.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 > Mantenha-o atualizado conforme o projeto evolui.
 
 ---
@@ -21,6 +22,7 @@
 - Frontend Vite: `5173`
 - Redis: `6379`
 - PostgreSQL: `5432`
+- Flower (Celery monitor): `5555`
 - Sempre verificar se portas estão livres antes de iniciar servidores.
 
 ---
@@ -96,204 +98,30 @@ Empresas brasileiras sofrem com:
 
 ---
 
-## Estrutura de Pastas
+## Estrutura de Pastas (resumo)
 
 ```
-fiscalai/
-├── README.md
-├── CLAUDE.md                  ← este arquivo
-├── .gitignore                 ← commit obrigatório
-│
-├── docs/                      ← Documentação do projeto
-│   ├── epics.md               ← épicos e user stories
-│   ├── arquitetura-infra.md   ← decisões de arquitetura (ADRs)
-│   ├── adr/                   ← Architecture Decision Records
-│   │   └── README.md
-│   ├── 1 - EFD-ICMSIPI-JAN2018.TXT
-│   ├── 2 - EFD-ICMSIPI-FEV2018.TXT
-│   └── 3 - EFD-ICMSIPI-MAR2018.TXT
-│
-├── backend/
-│   ├── README.md
-│   ├── requirements.txt
-│   ├── alembic.ini
-│   ├── .env.example           ← template de variáveis
-│   ├── .env.production        ← produção (git ignore)
-│   │
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py            ← entrada FastAPI
-│   │   │
-│   │   ├── core/              ← config, segurança, database
-│   │   │   ├── config.py
-│   │   │   ├── security.py
-│   │   │   ├── database.py
-│   │   │   └── celery_app.py
-│   │   │
-│   │   ├── models/            ← SQLAlchemy ORM
-│   │   │   ├── __init__.py
-│   │   │   ├── user.py
-│   │   │   ├── fiscal_document.py
-│   │   │   ├── ct_document.py
-│   │   │   ├── document.py
-│   │   │   └── rule_log.py
-│   │   │
-│   │   ├── schemas/           ← Pydantic request/response
-│   │   │   ├── __init__.py
-│   │   │   ├── auth.py
-│   │   │   └── documents.py
-│   │   │
-│   │   ├── exceptions/        ← custom exceptions (futuro)
-│   │   │   └── __init__.py
-│   │   │
-│   │   ├── parsers/           ← parsers de arquivos
-│   │   │   ├── __init__.py
-│   │   │   ├── detector.py
-│   │   │   ├── sped_efd_icms.py
-│   │   │   ├── nfe_xml.py
-│   │   │   └── cte_xml.py
-│   │   │
-│   │   ├── validators/        ← motor de regras fiscais
-│   │   │   ├── __init__.py
-│   │   │   └── rules/
-│   │   │       ├── __init__.py
-│   │   │       ├── base.py
-│   │   │       ├── dag.py
-│   │   │       ├── registry.py
-│   │   │       └── fiscal_rules.py
-│   │   │
-│   │   ├── ai/                ← detecção de anomalias, scoring (futuro)
-│   │   │   ├── __init__.py
-│   │   │   └── ...
-│   │   │
-│   │   ├── services/          ← lógica de negócio
-│   │   │   ├── __init__.py
-│   │   │   ├── auth_service.py
-│   │   │   ├── document_service.py
-│   │   │   ├── rule_service.py
-│   │   │   ├── scoring_service.py
-│   │   │   └── storage_service.py
-│   │   │
-│   │   ├── api/               ← rotas FastAPI
-│   │   │   ├── __init__.py
-│   │   │   ├── deps.py        ← dependencies
-│   │   │   ├── auth.py
-│   │   │   ├── uploads.py
-│   │   │   ├── documents.py
-│   │   │   └── validation.py
-│   │   │
-│   │   └── tasks/             ← Celery tasks
-│   │       ├── __init__.py
-│   │       ├── parse_document.py
-│   │       └── validate_document.py
-│   │
-│   ├── migrations/            ← Alembic DB migrations
-│   │   ├── versions/
-│   │   └── env.py
-│   │
-│   ├── tests/
-│   │   ├── conftest.py
-│   │   ├── fixtures/          ← EFD samples, test data
-│   │   │   ├── __init__.py
-│   │   │   ├── 1 - EFD-ICMSIPI-JAN2018.TXT
-│   │   │   ├── 2 - EFD-ICMSIPI-FEV2018.TXT
-│   │   │   └── 3 - EFD-ICMSIPI-MAR2018.TXT
-│   │   ├── unit/
-│   │   └── integration/
-│   │
-│   └── Dockerfile
-│
-├── frontend/
-│   ├── README.md
-│   ├── package.json
-│   ├── package-lock.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   ├── tailwind.config.js
-│   ├── postcss.config.js
-│   ├── .env.example           ← template de variáveis
-│   │
-│   ├── src/
-│   │   ├── main.tsx
-│   │   ├── App.tsx
-│   │   ├── index.css
-│   │   │
-│   │   ├── pages/             ← telas
-│   │   │   ├── DashboardPage.tsx
-│   │   │   ├── DocumentsPage.tsx
-│   │   │   ├── DocumentDetailPage.tsx
-│   │   │   ├── LoginPage.tsx
-│   │   │   ├── ReportsPage.tsx
-│   │   │   └── SettingsPage.tsx
-│   │   │
-│   │   ├── components/        ← componentes por feature
-│   │   │   ├── ui/            ← componentes primitivos (shadcn)
-│   │   │   ├── layout/        ← layout compartilhado
-│   │   │   ├── dashboard/     ← componentes do dashboard
-│   │   │   ├── documents/     ← componentes de documentos
-│   │   │   └── document-detail/ ← detalhes do documento
-│   │   │
-│   │   ├── hooks/             ← custom React hooks
-│   │   │   ├── usePeriodScore.ts
-│   │   │   ├── useAlertQueue.ts
-│   │   │   ├── useDocuments.ts
-│   │   │   ├── useDocumentScore.ts
-│   │   │   └── useValidationResults.ts
-│   │   │
-│   │   ├── contexts/          ← React contexts
-│   │   │   └── AuthContext.tsx
-│   │   │
-│   │   ├── services/          ← chamadas de API
-│   │   │   └── api.ts
-│   │   │
-│   │   ├── lib/               ← utilitários
-│   │   │   ├── utils.ts
-│   │   │   └── constants.ts   ← (futuro)
-│   │   │
-│   │   ├── types/             ← TypeScript types
-│   │   │   ├── api.ts
-│   │   │   └── auth.ts
-│   │   │
-│   │   └── __tests__/         ← testes colocalizados (futuro)
-│   │       ├── components/
-│   │       └── hooks/
-│   │
-│   ├── public/                ← assets estáticos
-│   │   └── favicon.ico
-│   │
-│   ├── Dockerfile
-│   ├── Dockerfile.prod
-│   └── nginx.conf
-│
-├── infra/                     ← Toda infraestrutura e deployment
-│   ├── README.md
-│   ├── docker-compose.yml     ← dev environment
-│   ├── docker-compose.prod.yml ← produção
-│   │
-│   ├── docker/                ← Dockerfiles centralizados (futuro)
-│   │   ├── backend.Dockerfile
-│   │   ├── frontend.Dockerfile
-│   │   └── .dockerignore
-│   │
-│   ├── scripts/               ← scripts de setup
-│   │   └── setup-easypanel.ps1
-│   │
-│   ├── k8s/                   ← Kubernetes (futuro)
-│   │   └── .gitkeep
-│   │
-│   └── terraform/             ← IaC (futuro)
-│       └── .gitkeep
-│
-├── scripts/                   ← scripts de utilidade
-│   ├── dev-setup.ps1         ← setup automático local (futuro)
-│   ├── lint.sh               ← linting (futuro)
-│   └── test.sh               ← execução de testes (futuro)
-│
-└── .github/                  ← CI/CD (futuro)
-    ├── workflows/
-    │   ├── test.yml          ← testes
-    │   └── deploy.yml        ← deployment
-    └── CODEOWNERS
+backend/app/
+├── core/          ← config, database, middleware (TenantMiddleware), celery, logging
+├── models/        ← SQLAlchemy ORM (FiscalDocument, CTDocument, User, RuleLog)
+├── schemas/       ← Pydantic request/response
+├── parsers/       ← detector.py + parsers por tipo (sped, nfe, cte)
+├── validators/rules/ ← BaseRule, RuleDAG (Kahn), RuleRegistry, fiscal_rules.py
+├── services/      ← lógica de negócio (auth, document, storage, scoring, report)
+├── api/           ← routers FastAPI (deps.py tem get_db com SET search_path)
+└── tasks/         ← Celery tasks (parse_document, validate_document)
+
+frontend/src/
+├── pages/         ← telas (Dashboard, Documents, DocumentDetail, Login, Reports)
+├── components/    ← por feature: ui/ (shadcn), dashboard/, documents/, document-detail/
+├── hooks/         ← custom hooks (useDocuments, usePeriodScore, useAlertQueue, useJobPolling)
+├── contexts/      ← AuthContext (JWT + tenant_id, persiste em localStorage)
+├── services/api.ts ← axios client, todas as chamadas HTTP
+└── types/         ← api.ts, auth.ts
+
+infra/
+├── docker-compose.yml      ← dev (PostgreSQL, Redis, MinIO, backend, frontend, Celery, Flower)
+└── docker-compose.prod.yml ← produção
 ```
 
 ---
@@ -355,17 +183,36 @@ Consulte `docs/epics.md` para detalhes completos.
 
 | # | Epic | Status | Prioridade |
 |---|---|---|---|
-| 1 | Ingestão e Parsing de Arquivos Fiscais | 🔲 Não iniciada | MVP |
-| 2 | Motor de Validação e Regras Fiscais | 🔲 Não iniciada | MVP |
-| 3 | Detecção de Inconsistências com IA | 🔲 Não iniciada | MVP |
-| 4 | Scoring de Risco Fiscal | 🔲 Não iniciada | MVP |
-| 5 | Dashboard Executivo e Alertas | 🔲 Não iniciada | MVP |
-| 6 | Relatórios e Exportação | 🔲 Não iniciada | MVP |
-| 7 | Multi-tenancy e Autenticação | 🔲 Não iniciada | MVP |
-| 8 | Pipeline Assíncrono e Escalabilidade | 🔲 Não iniciada | Fase 2 |
+| 1 | Ingestão e Parsing de Arquivos Fiscais | 🟡 Em andamento (6/7 ACs) | MVP |
+| 2 | Motor de Validação e Regras Fiscais | 🟡 Em andamento (8/9 regras) | MVP |
+| 3 | Detecção de Inconsistências com IA | 🔲 Não iniciada | Fase 2 |
+| 4 | Scoring de Risco Fiscal | 🟡 Em andamento (MVP core ✅) | MVP |
+| 5 | Dashboard Executivo e Alertas | 🟡 Em andamento (Dashboard MVP ✅) | MVP |
+| 6 | Relatórios e Exportação | 🟡 Em andamento (PDF+Excel+IA ✅) | MVP |
+| 7 | Multi-tenancy e Autenticação | 🟡 Em andamento (auth + schemas ✅) | MVP |
+| 8 | Pipeline Assíncrono e Escalabilidade | 🟡 Em andamento (Celery básico ✅) | MVP |
 | 9 | API Pública e Integrações ERP | 🔲 Não iniciada | Fase 2 |
-| 10 | Segurança, LGPD e Observabilidade | 🔲 Não iniciada | Fase 2 |
+| 10 | Segurança, LGPD e Observabilidade | 🟡 Em andamento (fundação ✅) | Fase 2 |
 | 11 | Onboarding, Planos e Monetização | 🔲 Não iniciada | Fase 3 |
+| 13 | Correções Segurança e LGPD | ✅ Concluída (2026-05-26) | Crítico |
+| 14 | Fundação Multi-Tenancy Completa | ✅ Concluída (2026-05-26) | Alto |
+| 15 | Completude Parser SPED + Cruzamento | ✅ Concluída parcial (2026-05-26) | Alto |
+| 16 | Tabelas de Referência Fiscal no BD | ✅ Concluída parcial (2026-05-26) | Alto |
+| 17 | Performance e Escalabilidade | 🟡 Em andamento (streaming ✅) | Alto |
+| 18 | Observabilidade e Health Check | 🟡 Em andamento (health+logs ✅) | Médio |
+
+---
+
+## Sprint Atual (referência: `.github/copilot-instructions.md`)
+
+| Sprint | Objetivo | Status |
+|---|---|---|
+| **A** | Upload Frontend (UploadZone, progresso, polling) | 🟡 Em progresso |
+| **B** | Backend fixes (CteCanceladoRule tabela, N+1 queries, Alembic migrations) | 🟡 Em progresso |
+| **C** | Relatórios PDF/Excel (ReportService, endpoints, Celery async) | 🔴 Planejado |
+
+**Critério de aceite do Sprint A:** usuário arrasta SPED.txt → barra de progresso → documento na lista com score.  
+**Critério de aceite do Sprint B:** sem ERRORs nos logs; `GET /documents` com 50 docs < 500ms.
 
 ---
 
@@ -421,32 +268,91 @@ docker-compose up -d
 # Flower: http://localhost:5555
 ```
 
+### Testes e Linting
+
+#### Backend — rodar todos os testes
+```powershell
+cd backend
+pytest tests/ -v
+```
+
+#### Backend — rodar um único arquivo de teste
+```powershell
+cd backend
+pytest tests/unit/test_fiscal_rules.py -v
+```
+
+#### Backend — rodar testes com cobertura
+```powershell
+cd backend
+pytest tests/ --cov=app --cov-report=term-missing
+```
+
+#### Backend — linting
+```powershell
+cd backend
+ruff check app/
+black --check app/
+```
+
+#### Frontend — linting
+```powershell
+cd frontend
+npm run lint
+```
+
+#### Frontend — build de produção
+```powershell
+cd frontend
+npm run build
+```
+
 ### Adicionando fixtures de teste
 Coloque arquivos de teste em `backend/tests/fixtures/`:
 - EFD samples em `.TXT`
 - XML NFe/CTe em `.xml`
 - Dados JSON em `.json`
 
-Referencie em testes:
+Referencie em testes usando o fixture `fixtures_dir` do conftest:
 ```python
 def test_parse_efd(fixtures_dir):
     efd_file = fixtures_dir / "1 - EFD-ICMSIPI-JAN2018.TXT"
 ```
 
-### Movendo Dockerfiles (Próximas Fases)
+---
 
-Eventualmente, Dockerfiles serão centralizados em `infra/docker/`:
-```
-# De:
-backend/Dockerfile
-frontend/Dockerfile
-frontend/Dockerfile.prod
+## Arquitetura — Padrões Não Óbvios
 
-# Para:
-infra/docker/backend.Dockerfile
-infra/docker/frontend.Dockerfile
-infra/docker/frontend.prod.Dockerfile
+### Fluxo de Multi-tenancy
+O isolamento de tenant funciona em duas etapas que dependem uma da outra:
+1. `TenantMiddleware` (`app/core/middleware.py`) decodifica o JWT e coloca `tenant_id` em `request.state.tenant_id`. **Não abre sessão de banco.**
+2. `get_db()` em `api/deps.py` lê `request.state.tenant_id` e executa `SET search_path = <tenant_id>, public` na sessão SQLAlchemy antes de yieldar.
+
+Resultado: todas as queries de um request rodam no schema do tenant automaticamente. Rotas públicas (login, register, health) estão em `_SKIP_PATHS` no middleware.
+
+### Motor de Regras (DAG)
+As regras fiscais em `validators/rules/fiscal_rules.py` são executadas via `RuleDAG` (`validators/rules/dag.py`) usando o algoritmo de Kahn para ordenação topológica. Cada `BaseRule` declara `depends_on` para garantir que pré-condições rodem antes. O `RuleRegistry` (`validators/rules/registry.py`) instancia e registra as regras.
+
+Para adicionar uma nova regra: subclasse `BaseRule`, implemente `execute()`, declare `rule_id` e `depends_on`, e registre em `registry.py`.
+
+### Pipeline Upload → Parse → Validate → Score
 ```
+POST /api/v1/uploads/
+  → StorageService (stream para MinIO/S3)
+  → Celery task: parse_document (detector de formato → parser correto)
+  → Celery task: validate_document (RuleDAG + ScoringService)
+  → resultado persistido em FiscalDocument + RuleLog
+```
+O frontend faz polling via `GET /api/v1/jobs/{job_id}` a cada 2s até status `completed` ou `failed`.
+
+### Scoring de Risco
+`ScoringService` (`services/scoring_service.py`) calcula score 0–100 por documento e por período. Níveis: `CRITICAL` (0–24), `HIGH` (25–49), `MEDIUM` (50–74), `LOW` (75–100). Penalidades baseadas em DL 1598 para estimativa de multa.
+
+### API
+Todos os endpoints usam o prefixo `/api/v1/`. Routers registrados em `app/main.py`: auth, uploads, documents, validation, jobs, reports. O Swagger está em `/docs` (desabilitado em produção via configuração).
+
+### Estrutura de Logging
+`app/core/logging_config.py` configura JSON structured logging (python-json-logger). `LogContext` em middleware propaga `tenant_id` para todos os logs do request. **LGPD: nunca logar CNPJ ou valores fiscais em texto plano.**
 
 ---
 

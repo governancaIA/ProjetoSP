@@ -10,7 +10,7 @@ services:
     ports:
       - "5173:80"
     environment:
-      - VITE_API_URL=https://adriner.fr/fiscalia/api
+      - VITE_API_URL=https://dev.fiscalia.com/fiscalia/api
       - NODE_ENV=production
     restart: always
     networks:
@@ -43,9 +43,9 @@ services:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin_password
       - MINIO_BUCKET=fiscalai-documents
-      - CORS_ORIGINS=https://adriner.fr,http://localhost:5173
+      - CORS_ORIGINS=https://dev.fiscalia.com,http://localhost:5173
       - SECRET_KEY=change-me-in-production-use-32-random-chars
-      - ALLOWED_HOSTS=adriner.fr,backend,localhost
+      - ALLOWED_HOSTS=dev.fiscalia.com,localhostbackend,localhost
       - LOG_LEVEL=INFO
     depends_on:
       postgres:

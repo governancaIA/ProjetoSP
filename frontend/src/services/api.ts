@@ -185,12 +185,36 @@ export const downloadReport = async (
   URL.revokeObjectURL(url)
 }
 
+export const downloadDocumentReport = async (documentId: number): Promise<void> => {
+  const token = localStorage.getItem('fiscalai_token')
+  const response = await fetch(`/api/v1/reports/document/${documentId}/pdf`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail ?? `Erro ${response.status}`)
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `fiscalai-documento-${documentId}.pdf`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 // ── Job Status ────────────────────────────────────────────────────────────────
 
 export interface JobStatusResponse {
   job_id: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
   document_id?: number
+  original_filename?: string
+  document_type?: string
   error?: string
 }
 
