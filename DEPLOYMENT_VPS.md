@@ -1,493 +1,250 @@
-# FiscalAI ó Deploy no VPS Hostinger
+# FiscalAI ‚Äî Deploy no VPS Hostinger
 
-## ?? Vis„o Geral
-
-Este guia cobre o deploy da stack FiscalAI completa (PostgreSQL, Redis, MinIO, FastAPI, Celery, React) no VPS Hostinger usando Docker Compose.
-
----
-
-## ?? PrÈ-requisitos
-
-### 1. Acesso ao VPS Hostinger
-- **Host:** seu_vps.com ou IP
-- **SSH User:** root ou usu·rio criado
-- **SSH Key:** gerada no painel Hostinger
-
-### 2. Verificar Ambiente
-
-Conectar ao VPS:
-```bash
-ssh -i sua_chave.pem root@seu_vps_ip
-```
-
-Verificar Docker:
-```bash
-docker --version
-docker-compose --version
-```
-
-Se n„o tiver Docker instalado:
-```bash
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-```
+**VPS:** adriner.fr (89.116.214.246) ‚Äî Hostinger KVM 2  
+**URL produ√ß√£o:** https://adriner.fr/fiscalia  
+**Stack:** Docker Compose + nginx + Let's Encrypt
 
 ---
 
-## ?? Etapa 1: Preparar VPS
+## Pr√©-requisitos
 
-### 1.1 Criar diretÛrio de projeto
+- Acesso SSH ao VPS: `ssh -i ~/.ssh/id_ed25519 root@89.116.214.246`
+- Docker + Docker Compose v2 instalados (ver Passo 0)
+- Reposit√≥rio no GitHub com GitHub Actions configurado
 
-```bash
-mkdir -p /var/www/fiscalai
-cd /var/www/fiscalai
-```
+---
 
-### 1.2 Clonar repositÛrio
-
-```bash
-git clone https://github.com/seu-usuario/fiscalai.git .
-```
-
-### 1.3 Criar .env a partir de .env.example
+## Passo 0 ‚Äî Preparar VPS (primeira vez)
 
 ```bash
-cp .env.example .env
+# Conectar
+ssh -i ~/.ssh/id_ed25519 root@89.116.214.246
+
+# Instalar depend√™ncias
+apt-get update && apt-get upgrade -y
+apt-get install -y docker.io curl git nginx certbot python3-certbot-nginx
+
+# Docker Compose v2
+curl -sL "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" \
+  -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+
+systemctl start docker && systemctl enable docker
+
+# Clonar reposit√≥rio
+mkdir -p /opt/fiscalai
+cd /opt/fiscalai
+git clone https://github.com/governancaIA/ProjetoSP.git .
 ```
 
-### 1.4 Atualizar vari·veis para produÁ„o
+---
+
+## Passo 1 ‚Äî Configurar vari√°veis de ambiente
 
 ```bash
-nano .env  # ou vim
+cd /opt/fiscalai/infra
+cp .env.prod.example .env.prod
+nano .env.prod
 ```
 
-**Vari·veis CRÕTICAS a alterar:**
+Vari√°veis cr√≠ticas a alterar:
 
 ```env
-# Database (usar o mesmo Postgres que vocÍ tem)
-DATABASE_URL=postgresql://postgres:cnfcnn4xbwv7eecahjly@chatwoot_bancosped:5432/sped?sslmode=disable
-
-# Redis (usar seu Redis remoto)
-REDIS_URL=redis://default:JIANkalu@123@chatwoot_async:6379
-CELERY_BROKER_URL=redis://default:JIANkalu@123@chatwoot_async:6379/0
-CELERY_RESULT_BACKEND=redis://default:JIANkalu@123@chatwoot_async:6379/1
-
-# MinIO (usar seu MinIO cloud)
-MINIO_ENDPOINT=chatwoot-minio.6hjchk.easypanel.host
-MINIO_ACCESS_KEY=admin
-MINIO_SECRET_KEY=password
-MINIO_USE_SSL=true
-
-# SEGURAN«A
+# Seguran√ßa (OBRIGAT√ìRIO mudar)
+SECRET_KEY=gere-com: python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 DEBUG=false
-SECRET_KEY=generate-uma-chave-segura-128-chars
-ACCESS_TOKEN_EXPIRE_MINUTES=30
 
-# CORS (ajustar para seu domÌnio)
-CORS_ORIGINS=["https://seu-dominio.com", "https://www.seu-dominio.com"]
+# Banco (usa PostgreSQL no pr√≥prio VPS via docker-compose.prod.yml)
+DATABASE_URL=postgresql://fiscalai_user:SENHA_SEGURA@postgres:5432/fiscalai_db
 
-# Frontend (apontar para o domÌnio real)
-VITE_API_BASE_URL=https://seu-dominio.com/api
-```
+# Redis
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/1
 
-**Gerar SECRET_KEY segura:**
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+# MinIO
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=SENHA_MINIO_SEGURA
+MINIO_USE_SSL=false
+
+# CORS
+CORS_ORIGINS=https://adriner.fr
+
+# Email alerts (opcional)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=seu@email.com
+SMTP_PASSWORD=app-password
+ALERT_EMAIL_TO=destinatario@email.com
 ```
 
 ---
 
-## ?? Etapa 2: Docker Compose em ProduÁ„o
+## Passo 2 ‚Äî Deploy autom√°tico (script)
 
-### 2.1 Criar docker-compose.prod.yml
-
-```bash
-# Copiar arquivo de desenvolvimento
-cp docker-compose.yml docker-compose.prod.yml
-```
-
-### 2.2 Editar docker-compose.prod.yml
-
-MudanÁas para produÁ„o:
-
-```yaml
-# Remover hot-reload do backend
-backend:
-  command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-  # SEM --reload em produÁ„o!
-
-# Frontend em modo build (nginx)
-frontend:
-  build:
-    context: ./frontend
-    dockerfile: Dockerfile.prod
-  command: npm run build
-  # Ser· servido por nginx reverse proxy
-```
-
-### 2.3 Iniciar stack em produÁ„o
+Execute no VPS:
 
 ```bash
-# Parar qualquer container anterior
-docker-compose down
+cd /opt/fiscalai
 
-# Iniciar nova stack (sem build se j· buildou)
+# Atualizar c√≥digo
+git pull origin main
+
+# Build e subir
+cd infra
+docker-compose -f docker-compose.prod.yml build --no-cache
 docker-compose -f docker-compose.prod.yml up -d
 
-# Verificar status
-docker-compose ps
+# Aguardar inicializa√ß√£o
+sleep 30
 
-# Ver logs
-docker-compose logs -f backend
+# Verificar status
+docker-compose -f docker-compose.prod.yml ps
 ```
 
 ---
 
-## ?? Etapa 3: Reverse Proxy (nginx)
-
-FiscalAI roda em containers, mas precisa ser acessÌvel via https no domÌnio.
-
-### 3.1 Instalar nginx
+## Passo 3 ‚Äî nginx como reverse proxy
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y nginx certbot python3-certbot-nginx
-```
-
-### 3.2 Criar configuraÁ„o nginx
-
-```bash
-sudo nano /etc/nginx/sites-available/fiscalai
-```
-
-Adicionar:
-
-```nginx
-upstream backend {
-    server localhost:8000;
-}
-
-upstream frontend {
-    server localhost:5173;  # ou nginx na porta 80 se build
-}
+cat > /etc/nginx/sites-available/fiscalai << 'EOF'
+upstream backend  { server localhost:8000; }
+upstream frontend { server localhost:5173; }
 
 server {
     listen 80;
-    server_name seu-dominio.com www.seu-dominio.com;
-
-    # Redirecionar HTTP para HTTPS
-    location / {
-        return 301 https://$server_name$request_uri;
-    }
+    server_name adriner.fr www.adriner.fr;
+    location /fiscalia { return 301 https://$server_name$request_uri; }
+    location /         { return 301 https://$server_name$request_uri; }
 }
 
 server {
     listen 443 ssl http2;
-    server_name seu-dominio.com www.seu-dominio.com;
+    server_name adriner.fr www.adriner.fr;
 
-    # Certificado SSL (ser· gerado por certbot)
-    ssl_certificate /etc/letsencrypt/live/seu-dominio.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/seu-dominio.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/adriner.fr/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/adriner.fr/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    client_max_body_size 2G;
 
-    # API Backend
-    location /api/ {
-        proxy_pass http://backend/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Frontend
-    location / {
+    # FiscalAI frontend
+    location /fiscalia/ {
         proxy_pass http://frontend/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+
+    # FiscalAI API
+    location /fiscalia/api/ {
+        proxy_pass http://backend/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+
+    location /fiscalia/health { proxy_pass http://backend/health; }
+
+    location /fiscalia/flower/ {
+        proxy_pass http://localhost:5555/;
+        proxy_set_header Host $host;
+    }
 }
-```
-
-### 3.3 Ativar configuraÁ„o
-
-```bash
-sudo ln -s /etc/nginx/sites-available/fiscalai /etc/nginx/sites-enabled/
-sudo nginx -t  # validar
-sudo systemctl restart nginx
-```
-
-### 3.4 Gerar certificado SSL (Let's Encrypt)
-
-```bash
-sudo certbot certonly --nginx -d seu-dominio.com -d www.seu-dominio.com
-
-# Auto-renovar
-sudo systemctl enable certbot.timer
-sudo systemctl start certbot.timer
-```
-
----
-
-## ?? Etapa 4: Banco de Dados
-
-Seu `DATABASE_URL` aponta para `chatwoot_bancosped` (remoto).
-
-### 4.1 Verificar conectividade
-
-```bash
-# Testar conex„o (do container)
-docker-compose exec backend psql -U postgres -h chatwoot_bancosped -d sped -c "SELECT 1"
-```
-
-### 4.2 Criar tables (se primeira execuÁ„o)
-
-```bash
-# Backend vai criar tables automaticamente no startup
-docker-compose logs -f backend | grep "create_all"
-```
-
-### 4.3 Backup do database
-
-```bash
-# Backup manual
-pg_dump -U postgres -h chatwoot_bancosped -d sped > backup.sql
-
-# Restaurar
-psql -U postgres -h chatwoot_bancosped -d sped < backup.sql
-```
-
----
-
-## ??? Etapa 5: Redis e MinIO
-
-### 5.1 Verificar Redis
-
-```bash
-# Testar conex„o
-docker-compose exec backend redis-cli -h chatwoot_async -a "JIANkalu@123" PING
-```
-
-### 5.2 Verificar MinIO
-
-```bash
-# Testar conex„o
-docker-compose exec backend python -c "
-from minio import Minio
-m = Minio('chatwoot-minio.6hjchk.easypanel.host', 
-          access_key='admin', secret_key='password', secure=True)
-print('MinIO OK')
-"
-```
-
----
-
-## ?? Etapa 6: Monitoramento
-
-### 6.1 Logs em tempo real
-
-```bash
-# Todos os logs
-docker-compose logs -f
-
-# Apenas backend
-docker-compose logs -f backend
-
-# Apenas worker
-docker-compose logs -f celery-worker
-```
-
-### 6.2 Flower (Celery Monitoring)
-
-Acessar: `https://seu-dominio.com/flower`
-
-(Precisa adicionar nginx rule para /flower ? localhost:5555)
-
-### 6.3 Health Check
-
-```bash
-# API respondendo?
-curl https://seu-dominio.com/health
-
-# Frontend carregando?
-curl https://seu-dominio.com/ | head -20
-```
-
----
-
-## ?? Troubleshooting
-
-### Backend n„o conecta ao PostgreSQL
-
-```bash
-# Verificar URL
-docker-compose exec backend env | grep DATABASE
-
-# Testar conex„o manual
-docker-compose exec backend psql $DATABASE_URL -c "SELECT 1"
-```
-
-### Redis desconectado
-
-```bash
-# Verificar conex„o
-docker-compose exec backend redis-cli -h chatwoot_async ping
-
-# Check password
-redis-cli -h chatwoot_async -a "JIANkalu@123" ping
-```
-
-### MinIO bucket n„o existe
-
-```bash
-# Criar bucket
-docker-compose exec backend python << 'EOF'
-from minio import Minio
-from minio.error import S3Error
-
-m = Minio('chatwoot-minio.6hjchk.easypanel.host',
-          access_key='admin', secret_key='password', secure=True)
-
-try:
-    m.make_bucket('fiscalai-documents')
-    print('Bucket created')
-except S3Error as e:
-    print(f'Error: {e}')
 EOF
-```
 
-### Frontend n„o carrega
-
-```bash
-# Verificar se est· sendo servido
-curl -I https://seu-dominio.com/
-
-# Check logs nginx
-sudo tail -f /var/log/nginx/error.log
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/fiscalai /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
 ```
 
 ---
 
-## ?? SeguranÁa em ProduÁ„o
-
-### 1. Firewall
+## Passo 4 ‚Äî SSL (Let's Encrypt)
 
 ```bash
-sudo ufw allow 22      # SSH
-sudo ufw allow 80      # HTTP
-sudo ufw allow 443     # HTTPS
-sudo ufw enable
-```
+certbot certonly --nginx -d adriner.fr -d www.adriner.fr \
+  --non-interactive --agree-tos --email admin@adriner.fr
 
-### 2. Vari·veis SensÌveis
-
-```bash
-# NUNCA commitar .env no Git!
-git status | grep .env
-# N„o deve listar .env ou .env.local
-
-# Verificar .gitignore
-cat .gitignore | grep .env
-```
-
-### 3. Debug Mode
-
-```bash
-# NUNCA em produÁ„o!
-DEBUG=true  # ? ERRADO
-
-# Sempre
-DEBUG=false  # ? CORRETO
-```
-
-### 4. CORS
-
-```bash
-# EspecÌfico para seu domÌnio
-CORS_ORIGINS=["https://seu-dominio.com"]
-
-# N√O usar wildcard
-CORS_ORIGINS=["*"]  # ? ERRADO EM PRODU«√O
+# Auto-renova√ß√£o
+(crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && systemctl reload nginx") | crontab -
 ```
 
 ---
 
-## ?? Escalar para ProduÁ„o
-
-### 1. Load Balancer
-
-Se tiver muito tr·fego, usar load balancer (nginx upstream):
-
-```nginx
-upstream backend_servers {
-    server backend-1:8000;
-    server backend-2:8000;
-    server backend-3:8000;
-}
-
-location /api/ {
-    proxy_pass http://backend_servers;
-}
-```
-
-### 2. Auto-restart
+## Passo 5 ‚Äî Firewall
 
 ```bash
-# docker-compose restart autom·tico
-docker-compose up -d --restart=always
-
-# ou systemd
-sudo systemctl enable docker
+ufw allow 22    # SSH
+ufw allow 80    # HTTP
+ufw allow 443   # HTTPS
+ufw --force enable
 ```
 
-### 3. Backups Autom·ticos
+---
+
+## CI/CD ‚Äî GitHub Actions
+
+O workflow `.github/workflows/deploy.yml` faz deploy autom√°tico a cada push na `main`:
+1. Build e testa no GitHub
+2. SSH no VPS ‚Üí `git pull` ‚Üí `docker-compose up -d --build`
+
+Para atualizar manualmente:
 
 ```bash
-# Script de backup di·rio
-0 2 * * * /var/www/fiscalai/backup.sh
+cd /opt/fiscalai && git pull origin main
+cd infra && docker-compose -f docker-compose.prod.yml up -d --build
 ```
 
 ---
 
-## ? Checklist Final
+## Monitoramento e manuten√ß√£o
 
-- [ ] Docker + Docker Compose instalados no VPS
-- [ ] RepositÛrio clonado em `/var/www/fiscalai`
-- [ ] `.env` configurado com credenciais reais
-- [ ] PostgreSQL remoto acessÌvel
-- [ ] Redis remoto acessÌvel
-- [ ] MinIO remoto acessÌvel e bucket criado
-- [ ] docker-compose up rodando
-- [ ] nginx configurado como reverse proxy
-- [ ] Certificado SSL (Let's Encrypt) ativo
-- [ ] Frontend acessÌvel em https://seu-dominio.com
-- [ ] API respondendo em https://seu-dominio.com/api
-- [ ] Health check OK: curl https://seu-dominio.com/health
-- [ ] Logs monitor·veis: docker-compose logs -f
-- [ ] DEBUG=false em .env
-- [ ] SECRET_KEY gerada e segura
-- [ ] Firewall configurado
-- [ ] Backups automatizados
+```bash
+# Status dos containers
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml ps
 
----
+# Logs em tempo real
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml logs -f backend
 
-## ?? VocÍ est· pronto para produÁ„o!
+# Health check
+curl https://adriner.fr/fiscalia/health
 
-Depois de validar tudo:
-1. ? Push cÛdigo para GitHub
-2. ? Pull no VPS
-3. ? Validar .env
-4. ? docker-compose up -d
-5. ? Acessar https://seu-dominio.com
+# M√©tricas Prometheus
+curl https://adriner.fr/fiscalia/metrics
+
+# Backup do banco
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml exec -T postgres \
+  pg_dump -U fiscalai_user fiscalai_db > /opt/backups/db_$(date +%Y%m%d).sql
+
+# Reiniciar servi√ßo espec√≠fico
+docker-compose -f /opt/fiscalai/infra/docker-compose.prod.yml restart backend
+```
 
 ---
 
-## Suporte
+## Troubleshooting
 
-Problemas? Verifique:
-1. `docker-compose logs backend` ó erros do backend
-2. `docker-compose logs celery-worker` ó tarefas assÌncronas
-3. `sudo tail -f /var/log/nginx/error.log` ó nginx
-4. `curl https://seu-dominio.com/health` ó API viva?
+| Sintoma | Diagn√≥stico | Solu√ß√£o |
+|---|---|---|
+| Backend n√£o conecta ao PostgreSQL | `docker logs fiscalai-postgres` | Aguardar healthcheck (~30s) |
+| `502 Bad Gateway` | nginx n√£o alcan√ßa container | `docker ps` ‚Äî verificar se backend est√° up |
+| SSL error | Certificado expirado | `certbot renew --force-renewal && nginx -s reload` |
+| Upload falha | MinIO sem bucket | `docker exec fiscalai-backend python -c "from app.core.storage import ensure_bucket; ensure_bucket()"` |
+| Celery n√£o processa | Redis desconectado | `docker-compose restart redis celery_worker` |
+
+---
+
+## Servi√ßos em produ√ß√£o
+
+| Servi√ßo | URL |
+|---|---|
+| Frontend | https://adriner.fr/fiscalia |
+| API Docs | https://adriner.fr/fiscalia/api/docs (dev only) |
+| Health | https://adriner.fr/fiscalia/health |
+| Flower | https://adriner.fr/fiscalia/flower |
+| Prometheus | https://adriner.fr/fiscalia/metrics |

@@ -1,115 +1,60 @@
-# Infra — Infraestrutura e Deployment
+# infra/ — Infraestrutura FiscalAI
 
-Este diretório centraliza toda a configuração de infraestrutura do projeto FiscalAI.
+Configuração Docker Compose para desenvolvimento local e produção no VPS.
 
-## Estrutura
+## Arquivos
 
 ```
 infra/
-├── README.md                  # Este arquivo
-├── docker-compose.yml         # Dev environment (local)
-├── docker-compose.prod.yml    # Production environment
-│
-├── docker/                    # Dockerfiles para aplicações
-│   ├── backend.Dockerfile     # (futuro - mover de backend/)
-│   ├── frontend.Dockerfile    # (futuro - mover de frontend/)
-│   └── .dockerignore
-│
-├── scripts/                   # Scripts de setup e deployment
-│   ├── setup-easypanel.ps1    # Setup automático EasyPanel
-│   └── setup-local-env.sh     # Setup local (futuro)
-│
-├── k8s/                       # Kubernetes manifests (futuro)
-│   └── .gitkeep
-│
-└── terraform/                 # Infrastructure as Code (futuro)
-    └── .gitkeep
+├── docker-compose.yml       # Dev local (PostgreSQL, Redis, MinIO, backend, frontend, Celery, Flower)
+├── docker-compose.prod.yml  # Produção no VPS Hostinger
+├── .env.prod.example        # Template de variáveis de produção
+├── REFERENCE_VARS.md        # Referência completa de variáveis
+├── scripts/
+│   └── setup-vps.sh         # Script de setup inicial do VPS
+└── README.md                # Este arquivo
 ```
 
-## Desenvolvimento Local
+## Dev local
 
-Inicia toda a stack de desenvolvimento:
+```powershell
+# Subir tudo
+cd infra
+docker compose up -d
 
-```bash
-cd infra/
-docker-compose up -d
+# Parar
+docker compose down
+
+# Parar e limpar volumes
+docker compose down -v
 ```
 
-Acesso aos serviços:
-- **Frontend:** http://localhost:5173
-- **Backend API:** http://localhost:8000
-- **Flower (Celery):** http://localhost:5555
-- **MinIO Console:** http://localhost:9001 (user: minioadmin / pass: minioadmin_password_dev)
+Portas locais:
+
+| Serviço | URL | Credenciais |
+|---|---|---|
+| Frontend | http://localhost:5173 | — |
+| Backend API | http://localhost:8000/docs | — |
+| Flower (Celery) | http://localhost:5555 | — |
+| MinIO Console | http://localhost:9001 | minioadmin / minioadmin_password_dev |
+| PostgreSQL | localhost:5432 | fiscalai_user / fiscalai_password_dev |
 
 ## Produção
 
-Para ambientes de produção, use `docker-compose.prod.yml`:
+Deploy no VPS Hostinger (adriner.fr). Ver [../DEPLOYMENT_VPS.md](../DEPLOYMENT_VPS.md) para o guia completo.
 
 ```bash
-cd infra/
-docker-compose -f docker-compose.prod.yml up -d
+# No VPS
+cd /opt/fiscalai/infra
+docker-compose -f docker-compose.prod.yml up -d --build
 ```
 
-**Antes de usar em produção:**
-1. Altere todas as senhas em `docker-compose.prod.yml`
-2. Configure variáveis de ambiente apropriadas
-3. Configure domínios e SSL
-4. Revise a política de restart (`restart: always`)
+## Variáveis de ambiente
 
-## EasyPanel Deployment
+Ver [REFERENCE_VARS.md](REFERENCE_VARS.md) para a lista completa de variáveis e seus valores padrão.
 
-FiscalAI está pronto para rodar no EasyPanel com toda a stack (PostgreSQL, Redis, MinIO).
-
-**Guias de Deploy:**
-
-1. **🚀 Quick Start** — [QUICKSTART_EASYPANEL.md](QUICKSTART_EASYPANEL.md)  
-   Resumo de 5 passos para colocar no ar rapidamente.
-
-2. **📖 Guia Completo** — [EASYPANEL_SETUP_GUIA.md](EASYPANEL_SETUP_GUIA.md)  
-   Passo-a-passo detalhado com troubleshooting.
-
-3. **🏗️ Arquitetura** — [EASYPANEL_ARQUITETURA.md](EASYPANEL_ARQUITETURA.md)  
-   Entenda como os componentes se conectam.
-
-**Resumo:**
-- 2 Apps: Backend (FastAPI) + Frontend (React)
-- 3 Serviços: PostgreSQL, Redis, MinIO
-- SSL automático via Let's Encrypt
-- Deploy contínuo do GitHub
-
-Veja [setup-easypanel.ps1](scripts/setup-easypanel.ps1) para detalhes técnicos.
-
-## Health Checks
-
-Todos os serviços possuem healthchecks configurados:
-
+Copiar template:
 ```bash
-docker-compose ps
+cp infra/.env.prod.example infra/.env.prod
+# Editar com credenciais reais
 ```
-
-Para monitorar logs:
-
-```bash
-docker-compose logs -f [service_name]
-```
-
-## Dados Persistentes
-
-Os volumes criados são:
-- `postgres_data` — Base de dados PostgreSQL
-- `redis_data` — Cache Redis
-- `minio_data` — Object storage MinIO
-
-**Cuidado:** `docker-compose down` não remove volumes. Para remover:
-
-```bash
-docker-compose down -v
-```
-
-## Roadmap
-
-- [ ] Consolidar Dockerfiles em `docker/`
-- [ ] Adicionar Kubernetes manifests
-- [ ] Adicionar Terraform para AWS/GCP
-- [ ] Scripts de backup para volumes
-- [ ] Monitoramento com Prometheus + Grafana

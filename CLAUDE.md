@@ -185,34 +185,34 @@ Consulte `docs/epics.md` para detalhes completos.
 |---|---|---|---|
 | 1 | Ingestão e Parsing de Arquivos Fiscais | 🟡 Em andamento (6/7 ACs) | MVP |
 | 2 | Motor de Validação e Regras Fiscais | 🟡 Em andamento (8/9 regras) | MVP |
-| 3 | Detecção de Inconsistências com IA | 🔲 Não iniciada | Fase 2 |
-| 4 | Scoring de Risco Fiscal | 🟡 Em andamento (MVP core ✅) | MVP |
-| 5 | Dashboard Executivo e Alertas | 🟡 Em andamento (Dashboard MVP ✅) | MVP |
-| 6 | Relatórios e Exportação | 🟡 Em andamento (PDF+Excel+IA ✅) | MVP |
-| 7 | Multi-tenancy e Autenticação | 🟡 Em andamento (auth + schemas ✅) | MVP |
+| 3 | Detecção de Inconsistências com IA | 🟡 Em andamento (Z-score + sequências + ranking ✅) | Fase 2 |
+| 4 | Scoring de Risco Fiscal | ✅ Concluída (scoring + trend 12m ✅) | MVP |
+| 5 | Dashboard Executivo e Alertas | 🟡 Em andamento (trend + fornecedores ✅, diff XML ❌) | MVP |
+| 6 | Relatórios e Exportação | 🟡 Em andamento (PDF+Excel+por doc ✅, agendamento ❌) | MVP |
+| 7 | Multi-tenancy e Autenticação | ✅ Concluída (auth + schemas + onboarding ✅) | MVP |
 | 8 | Pipeline Assíncrono e Escalabilidade | 🟡 Em andamento (Celery básico ✅) | MVP |
 | 9 | API Pública e Integrações ERP | 🔲 Não iniciada | Fase 2 |
-| 10 | Segurança, LGPD e Observabilidade | 🟡 Em andamento (fundação ✅) | Fase 2 |
+| 10 | Segurança, LGPD e Observabilidade | 🟡 Em andamento (audit log + Prometheus + PII masking ✅) | Fase 2 |
 | 11 | Onboarding, Planos e Monetização | 🔲 Não iniciada | Fase 3 |
 | 13 | Correções Segurança e LGPD | ✅ Concluída (2026-05-26) | Crítico |
 | 14 | Fundação Multi-Tenancy Completa | ✅ Concluída (2026-05-26) | Alto |
 | 15 | Completude Parser SPED + Cruzamento | ✅ Concluída parcial (2026-05-26) | Alto |
 | 16 | Tabelas de Referência Fiscal no BD | ✅ Concluída parcial (2026-05-26) | Alto |
-| 17 | Performance e Escalabilidade | 🟡 Em andamento (streaming ✅) | Alto |
-| 18 | Observabilidade e Health Check | 🟡 Em andamento (health+logs ✅) | Médio |
+| 17 | Performance e Escalabilidade | 🟡 Em andamento (streaming + temp file ✅) | Alto |
+| 18 | Observabilidade e Health Check | 🟡 Em andamento (health + logs + Prometheus ✅) | Médio |
 
 ---
 
-## Sprint Atual (referência: `.github/copilot-instructions.md`)
+## Sprints Concluídos
 
 | Sprint | Objetivo | Status |
 |---|---|---|
-| **A** | Upload Frontend (UploadZone, progresso, polling) | 🟡 Em progresso |
-| **B** | Backend fixes (CteCanceladoRule tabela, N+1 queries, Alembic migrations) | 🟡 Em progresso |
-| **C** | Relatórios PDF/Excel (ReportService, endpoints, Celery async) | 🔴 Planejado |
-
-**Critério de aceite do Sprint A:** usuário arrasta SPED.txt → barra de progresso → documento na lista com score.  
-**Critério de aceite do Sprint B:** sem ERRORs nos logs; `GET /documents` com 50 docs < 500ms.
+| **A** | Upload Frontend (UploadZone, progresso, polling, toasts) | ✅ Concluído |
+| **B** | Backend fixes (N+1 queries, storage temp file, migrations 001–006) | ✅ Concluído |
+| **C** | Relatórios PDF/Excel (ReportService, 3 endpoints, ReportsPage, botão por doc) | ✅ Concluído |
+| **D** | Dashboard trend 12 meses + email alerts CRITICAL (SMTP opcional) | ✅ Concluído |
+| **E** | LGPD masking (CNPJ/CPF), audit log, Prometheus `/metrics`, X-Request-ID | ✅ Concluído |
+| **F** | Epic 3: Z-score anomaly, SequenciaNotasRule, ranking fornecedores | ✅ Concluído |
 
 ---
 

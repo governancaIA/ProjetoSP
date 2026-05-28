@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(bmad --version)"
-    ]
-  }
-}
