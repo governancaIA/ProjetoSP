@@ -119,6 +119,33 @@ def validate_document(
         failed_results = [r for r in all_results if not r.passed]
         critical_results = [r for r in failed_results if r.severity == SeverityLevel.CRITICAL]
 
+        # Fire critical alert email (non-blocking — failure doesn't affect task result)
+        if critical_results:
+            try:
+                from app.services.email_service import send_critical_alert_email
+                from app.services.scoring_service import ScoringService
+                alerts_payload = []
+                for r in critical_results:
+                    # Find the fiscal_doc that produced this result to estimate exposure
+                    fdoc_match = next(
+                        (fd for fd in fiscal_docs if any(rl.id == r.id for rl in fd.rule_logs)),
+                        fiscal_docs[0],
+                    )
+                    _, exposure = ScoringService.calculate_alert_severity(r, fdoc_match)
+                    alerts_payload.append({
+                        "rule_id": r.rule_id,
+                        "message": r.message,
+                        "exposure": float(exposure),
+                    })
+                send_critical_alert_email(
+                    tenant_id=tenant_id,
+                    document_id=document_id,
+                    original_filename=parent_doc.original_filename if parent_doc else f"doc_{document_id}",
+                    critical_alerts=alerts_payload,
+                )
+            except Exception as email_exc:
+                logger.warning("Email alert dispatch failed (non-fatal): %s", email_exc)
+
         return {
             "status": "completed",
             "document_id": document_id,

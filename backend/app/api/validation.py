@@ -128,6 +128,22 @@ async def get_period_score(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/periods/trend")
+async def get_score_trend(
+    months: int = Query(default=12, ge=1, le=24),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns period scores for the last N months (oldest → newest).
+    Used by the dashboard trend chart.
+    """
+    try:
+        return ScoringService.get_trend(db, current_user.tenant_id, months)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def _mask_chave_acesso(chave: str | None) -> str | None:
     """Mask CNPJ digits (positions 7-20) in NF-e access key per LGPD Art. 46."""
     if not chave or len(chave) < 20:

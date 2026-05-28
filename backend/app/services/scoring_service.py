@@ -406,6 +406,37 @@ class ScoringService:
         }
 
     @staticmethod
+    def get_trend(
+        db: Session,
+        tenant_id: str,
+        months: int = 12,
+    ) -> List[Dict[str, Any]]:
+        """
+        Returns period scores for the last N months (oldest → newest).
+        Periods with no documents return score=100, exposure=0.
+        """
+        from datetime import date
+
+        today = date.today()
+        result = []
+        for i in range(months - 1, -1, -1):
+            # Walk backwards: i=months-1 is oldest, i=0 is current month
+            year = today.year
+            month = today.month - i
+            while month <= 0:
+                month += 12
+                year -= 1
+            period = ScoringService.get_period_score(db, tenant_id, year, month)
+            result.append({
+                "period": period["period"],
+                "period_score": period["period_score"],
+                "total_exposure": period["total_exposure"],
+                "documents_processed": period["documents_processed"],
+                "critical_documents": period["critical_documents"],
+            })
+        return result
+
+    @staticmethod
     def get_alert_prioritization_queue(
         db: Session,
         tenant_id: str,

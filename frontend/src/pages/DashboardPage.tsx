@@ -8,6 +8,8 @@ import { SeverityChart } from '@/components/dashboard/SeverityChart'
 import { TopFailedRules } from '@/components/dashboard/TopFailedRules'
 import { usePeriodScore } from '@/hooks/usePeriodScore'
 import { useAlertQueue } from '@/hooks/useAlertQueue'
+import { usePeriodTrend } from '@/hooks/usePeriodTrend'
+import { TrendChart } from '@/components/dashboard/TrendChart'
 import { formatBRL, getCurrentYearMonth } from '@/lib/utils'
 
 export function DashboardPage() {
@@ -17,6 +19,7 @@ export function DashboardPage() {
 
   const periodQuery = usePeriodScore(selectedYear, selectedMonth)
   const alertsQuery = useAlertQueue(10)
+  const trendQuery = usePeriodTrend(12)
 
   return (
     <div className="flex flex-col h-full">
@@ -92,15 +95,31 @@ export function DashboardPage() {
           </Card>
         </div>
 
-        {/* Top Failed Rules */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Top 3 Regras Falhadas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <TopFailedRules rules={periodQuery.data?.top_3_rules ?? []} />
-          </CardContent>
-        </Card>
+        {/* Bottom row: trend + top rules */}
+        <div className="grid grid-cols-3 gap-6">
+          <div className="col-span-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Evolução do Score — Últimos 12 Meses</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TrendChart data={trendQuery.data ?? []} loading={trendQuery.isLoading} />
+                <p className="mt-2 text-xs text-slate-400">
+                  Linhas de referência: verde = ≥75 (baixo risco) · laranja = ≥50 (atenção) · abaixo = crítico
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Top 3 Regras Falhadas</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TopFailedRules rules={periodQuery.data?.top_3_rules ?? []} />
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

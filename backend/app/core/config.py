@@ -77,6 +77,18 @@ class Settings(BaseSettings):
     BRAND_WHATSAPP: str = ""
     BRAND_LOGO_URL: str = ""
 
+    # Email / SMTP (optional — leave blank to disable email alerts)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "alertas@fiscalai.com.br"
+    ALERT_EMAIL_TO: str = ""  # comma-separated list of recipient addresses
+
+    @property
+    def email_enabled(self) -> bool:
+        return bool(self.SMTP_HOST and self.SMTP_USER and self.ALERT_EMAIL_TO)
+
     # Logging
     LOG_LEVEL: str = "INFO"
 

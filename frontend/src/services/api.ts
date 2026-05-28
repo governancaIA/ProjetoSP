@@ -150,6 +150,19 @@ export const uploadFiles = (
     .then((r) => r.data)
 }
 
+// ── Trend ────────────────────────────────────────────────────────────────────
+
+export interface PeriodTrendPoint {
+  period: string
+  period_score: number
+  total_exposure: number
+  documents_processed: number
+  critical_documents: number
+}
+
+export const fetchPeriodTrend = (months = 12): Promise<PeriodTrendPoint[]> =>
+  client.get<PeriodTrendPoint[]>('/periods/trend', { params: { months } }).then((r) => r.data)
+
 // ── Reports ───────────────────────────────────────────────────────────────────
 
 export const downloadReport = async (
