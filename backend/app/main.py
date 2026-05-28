@@ -30,6 +30,7 @@ from minio import Minio
 from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal
 from app.core.middleware import TenantMiddleware
+from app.core import metrics as _metrics  # noqa: F401 — registers Prometheus metrics at startup
 from app.api import uploads, documents, validation, auth, jobs, reports
 
 # Global rate limiter — keyed by client IP
@@ -87,6 +88,14 @@ app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 @app.get("/")
 async def root():
     return {"message": f"{settings.BRAND_NAME or 'FiscalAI'} API", "version": "0.1.0", "status": "running"}
+
+
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics():
+    """Prometheus scrape endpoint — consumed by Grafana/Prometheus."""
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from fastapi.responses import Response as _Response
+    return _Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health")

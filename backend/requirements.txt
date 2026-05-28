@@ -46,6 +46,7 @@ httpx==0.28.0
 
 # Logging & Monitoring
 python-json-logger==3.2.0
+prometheus-client==0.21.0
 
 # Rate Limiting
 slowapi==0.1.9

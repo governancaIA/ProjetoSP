@@ -17,6 +17,7 @@ import app.models.document  # noqa: F401
 import app.models.fiscal_document  # noqa: F401
 import app.models.ct_document  # noqa: F401
 import app.models.rule_log  # noqa: F401
+import app.models.audit_log  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
