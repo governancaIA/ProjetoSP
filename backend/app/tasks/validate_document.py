@@ -13,6 +13,7 @@ from app.models.rule_log import SeverityLevel
 from app.validators.rules.dag import RuleDAG
 from app.validators.rules.registry import get_active_rules
 import app.validators.rules.fiscal_rules  # noqa: F401 — registra as regras no registry
+import app.validators.rules.anomaly_rules  # noqa: F401 — registra regras de anomalia
 from app.services.rule_service import RuleService, RuleServiceError
 
 
@@ -95,7 +96,27 @@ def validate_document(
             .all()
         )
 
+        # Pre-fetch historical valor_total per emitente_cnpj (for ValorAnomalyRule Z-score)
+        # One query per unique CNPJ — avoids N+1 inside the rule execution
+        emitente_cnpjs = {fd.emitente_cnpj for fd in fiscal_docs if fd.emitente_cnpj}
+        current_ids = [fd.id for fd in fiscal_docs]
+        supplier_valor_history: dict[str, list[float]] = {}
+        for cnpj in emitente_cnpjs:
+            rows = (
+                db.query(FiscalDocument.valor_total)
+                .filter(
+                    FiscalDocument.tenant_id == tenant_id,
+                    FiscalDocument.emitente_cnpj == cnpj,
+                    FiscalDocument.superseded == False,
+                    FiscalDocument.id.notin_(current_ids),
+                )
+                .limit(200)
+                .all()
+            )
+            supplier_valor_history[cnpj] = [float(r[0]) for r in rows if r[0] is not None]
+
         # Execute rules against each FiscalDocument
+        from datetime import date as _date
         for fdoc in fiscal_docs:
             logger.info(f"Running rules on fiscal_document {fdoc.id} ({fdoc.chave_acesso})")
 
@@ -103,6 +124,8 @@ def validate_document(
             # Inject per-document context so rules can adapt their behavior
             config["source_document_type"] = source_type
             config["ct_documents"] = ct_docs
+            config["supplier_valor_history"] = supplier_valor_history
+            config["validation_date"] = _date.today()
 
             # Execute all rules for this document
             results = dag.execute(fdoc, fdoc.items, config)

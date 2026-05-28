@@ -67,6 +67,16 @@ def hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
+def mask_cnpj(cnpj: str | None) -> str:
+    """Mask CNPJ keeping only first 8 digits visible (LGPD Art. 46)."""
+    if not cnpj:
+        return "***CNPJ***"
+    clean = "".join(c for c in cnpj if c.isdigit())
+    if len(clean) < 8:
+        return "***CNPJ***"
+    return clean[:8] + "******"
+
+
 def mask_chave_acesso(chave: str) -> str:
     """
     Mask the CNPJ portion of an NF-e/CT-e chave de acesso for LGPD compliance.

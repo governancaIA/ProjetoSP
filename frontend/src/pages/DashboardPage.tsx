@@ -9,7 +9,9 @@ import { TopFailedRules } from '@/components/dashboard/TopFailedRules'
 import { usePeriodScore } from '@/hooks/usePeriodScore'
 import { useAlertQueue } from '@/hooks/useAlertQueue'
 import { usePeriodTrend } from '@/hooks/usePeriodTrend'
+import { useFornecedorRanking } from '@/hooks/useFornecedorRanking'
 import { TrendChart } from '@/components/dashboard/TrendChart'
+import { FornecedorRanking } from '@/components/dashboard/FornecedorRanking'
 import { formatBRL, getCurrentYearMonth } from '@/lib/utils'
 
 export function DashboardPage() {
@@ -20,6 +22,7 @@ export function DashboardPage() {
   const periodQuery = usePeriodScore(selectedYear, selectedMonth)
   const alertsQuery = useAlertQueue(10)
   const trendQuery = usePeriodTrend(12)
+  const rankingQuery = useFornecedorRanking(10)
 
   return (
     <div className="flex flex-col h-full">
@@ -94,6 +97,16 @@ export function DashboardPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Fornecedor ranking */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Fornecedores com Maior Taxa de Falha</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <FornecedorRanking data={rankingQuery.data ?? []} loading={rankingQuery.isLoading} />
+          </CardContent>
+        </Card>
 
         {/* Bottom row: trend + top rules */}
         <div className="grid grid-cols-3 gap-6">

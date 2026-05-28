@@ -31,7 +31,7 @@ from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal
 from app.core.middleware import TenantMiddleware
 from app.core import metrics as _metrics  # noqa: F401 — registers Prometheus metrics at startup
-from app.api import uploads, documents, validation, auth, jobs, reports
+from app.api import uploads, documents, validation, auth, jobs, reports, fornecedores
 
 # Global rate limiter — keyed by client IP
 limiter = Limiter(key_func=get_remote_address)
@@ -83,6 +83,7 @@ app.include_router(documents.router, prefix="/api/v1", tags=["documents"])
 app.include_router(validation.router, prefix="/api/v1", tags=["validation"])
 app.include_router(jobs.router, prefix="/api/v1", tags=["jobs"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
+app.include_router(fornecedores.router, prefix="/api/v1", tags=["fornecedores"])
 
 
 @app.get("/")

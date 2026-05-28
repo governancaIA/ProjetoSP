@@ -150,6 +150,20 @@ export const uploadFiles = (
     .then((r) => r.data)
 }
 
+// ── Fornecedores ──────────────────────────────────────────────────────────────
+
+export interface FornecedorRankingItem {
+  emitente_cnpj_masked: string
+  emitente_nome: string
+  total_nfs: number
+  docs_com_falha: number
+  failure_rate: number
+  total_valor: number
+}
+
+export const fetchFornecedorRanking = (limit = 10): Promise<FornecedorRankingItem[]> =>
+  client.get<FornecedorRankingItem[]>('/fornecedores/ranking', { params: { limit } }).then((r) => r.data)
+
 // ── Trend ────────────────────────────────────────────────────────────────────
 
 export interface PeriodTrendPoint {
